@@ -27,13 +27,19 @@ export default {
           "100%": { opacity: "1", transform: "scale(1)" },
         },
         petal: {
-          "0%": { opacity: "0", transform: "scale(.7)" },
-          "100%": { opacity: "1", transform: "scale(1)" },
+          // The centring translate must live inside the keyframes. An animation
+          // that fills forwards replaces the `translate-*` utilities with its own
+          // transform, so leaving it out pins every petal by its top-left corner
+          // — which pushes wide chips off the edge of the overlay.
+          "0%": { opacity: "0", transform: "translate(-50%, -50%) scale(.7)" },
+          "100%": { opacity: "1", transform: "translate(-50%, -50%) scale(1)" },
         },
       },
       animation: {
         bloom: "bloom 110ms ease-out both",
-        petal: "petal 130ms cubic-bezier(.2,.8,.3,1) both",
+        // No fill mode: once it ends the utilities take the transform back, so
+        // the hover scale keeps working.
+        petal: "petal 130ms cubic-bezier(.2,.8,.3,1)",
       },
     },
   },

@@ -2,8 +2,13 @@ import type { CSSProperties } from "react";
 
 import type { MenuModel, Petal } from "../lib/types";
 
-/** The overlay window is square; everything is positioned from this size. */
-export const RING_SIZE = 560;
+/**
+ * The overlay window is square; everything is positioned from this size.
+ *
+ * 640 with petals at 238 leaves ~30 px of slack for the widest chip label at the
+ * horizontal, which is where the ring runs out of window first.
+ */
+export const RING_SIZE = 640;
 const CX = RING_SIZE / 2;
 const CY = RING_SIZE / 2;
 const R_CATEGORY = 146;
@@ -40,13 +45,19 @@ function guideRing(radius: number): CSSProperties {
   };
 }
 
-/** Conversions wear their target format; everything else wears its label. */
-function tokenOf(petal: Petal): string {
+/**
+ * Conversions wear their target format. Everything else wears its label — except
+ * the overflow petal, which says how many petals were hidden rather than echoing
+ * the "More" *category* sitting on the ring behind it.
+ */
+function tokenOf(petal: Petal, hidden = 0): string {
   if (petal.kind === "conversion") {
     return petal.icon.toUpperCase();
   }
-  const label = petal.label.replace(/…/g, "").trim();
-  return label.length > 7 ? `${label.slice(0, 6)}…` : label;
+  if (petal.id === "op:more") {
+    return hidden > 0 ? `+${hidden} more` : "More";
+  }
+  return petal.label.replace(/…/g, "").trim();
 }
 
 interface Props {
@@ -100,6 +111,7 @@ export default function RadialMenu({
                 : "bg-ink-800/85 text-white/70 ring-1 ring-white/10 hover:bg-ink-700/90 hover:text-white",
             ].join(" ")}
             style={{ left: x, top: y }}
+            title={category.label}
           >
             {category.label}
             {category.hidden > 0 && (
@@ -132,8 +144,9 @@ export default function RadialMenu({
                   : "bg-ink-800/90 text-white/85 ring-1 ring-white/10 hover:bg-ink-700",
             ].join(" ")}
             style={{ left: x, top: y }}
+            title={petal.disabled?.reason ?? petal.label}
           >
-            {tokenOf(petal)}
+            {tokenOf(petal, active.hidden)}
             {petal.badge && (
               <span className="absolute -right-1 -top-2 rounded-full bg-ink-900/90 px-1.5 py-0.5 text-[9px] font-normal text-white/55 ring-1 ring-white/10">
                 {petal.coverage}/{petal.total}

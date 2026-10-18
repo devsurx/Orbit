@@ -77,22 +77,39 @@ by design, so we say so instead of shipping something flaky.
 | **Windows 10/11** | ✅ | hotkey · tray · palette | Low-level mouse/keyboard hooks + drop overlay. |
 | **macOS 12+** | ✅ | hotkey · tray · palette | `NSEvent` monitors; needs Accessibility permission. |
 | **Linux — X11** | ✅ | hotkey · tray · palette | XInput2 / XRecord + XDND. Tested via XWayland too. |
-| **Linux — Wayland** | ⚠️ | tray · palette · Open with · compositor binding | No global Shift-drag **and no global hotkey** — the platform forbids both. |
+| **Linux — Wayland** | ⚠️ | tray · palette · Open with · compositor binding | No global Shift-drag **and no in-app hotkey** — see below. |
 
 > ⚠️ **Wayland has no global hotkey path at all.** Orbit's hotkey goes through
 > `XGrabKey`, which Wayland deliberately makes inert: the compositor owns input,
 > and XWayland only sees events for the focused X11 window. The grab even
-> *succeeds*, so the failure is silent.
->
-> On Wayland, bind Orbit in your compositor instead — that is the supported
-> mechanism. For Hyprland:
->
-> ```ini
-> bind = CTRL SHIFT, SPACE, exec, orbit-app
-> ```
->
-> This requires single-instance handling (M4) so the binding summons the running
-> app rather than spawning a second copy.
+> *succeeds*, so the failure is silent — Orbit prints a note at startup rather
+> than leaving you pressing keys at nothing.
+
+### ⌨️ Global hotkeys on Wayland
+
+Only the compositor may own a global shortcut, so you bind Orbit there instead.
+Orbit ships **single-instance support**, which is what makes that binding a real
+trigger: the second launch hands its arguments to the running instance and exits,
+rather than adding a second tray icon and a second overlay.
+
+**Hyprland** — `~/.config/hypr/hyprland.conf`:
+
+```ini
+bind = CTRL SHIFT, SPACE, exec, orbit-app
+```
+
+**sway** — `~/.config/sway/config`:
+
+```ini
+bindsym Ctrl+Shift+space exec orbit-app
+```
+
+**GNOME** — Settings → Keyboard → Custom Shortcuts, command `orbit-app`.
+**KDE Plasma** — System Settings → Shortcuts → Custom, command `orbit-app`.
+
+Use an absolute path if `orbit-app` is not on your `PATH`. Bound with a file
+argument it selects that file; bound bare it reopens the ring for the last
+selection.
 
 ### 🪟 Known limitation: translucent windows on Linux
 
@@ -103,7 +120,9 @@ this honestly rather than shipping a blank window:
 - `tauri.conf.json` keeps real translucency, which is what macOS and Windows
   (WebView2) use.
 - [`tauri.linux.conf.json`](crates/orbit-app/tauri.linux.conf.json) overrides the
-  ring to an opaque window on Linux, where the ring paints its own dark panel.
+  ring to an opaque window on Linux, where the ring paints its own dark panel and
+  sets a matching `backgroundColor` — without one, the corners outside the panel's
+  radius show the platform default, a light grey wedge.
 
 The result is a glassy ring on macOS/Windows and a solid dark one on Linux. We
 prefer that over a menu that does not appear at all.
@@ -161,6 +180,8 @@ npm run build        # UI → ./dist, which Tauri embeds into the binary
 cargo run -p orbit-app --features custom-protocol
 
 # Then: Ctrl/Cmd+Shift+Space for the ring, or left-click the tray icon.
+#       (Wayland has no in-app hotkey — bind Orbit in your compositor instead;
+#        see the platform section above.)
 
 # Or hand it files directly (the "Open with Orbit" / "Send to" route):
 cargo run -p orbit-app --features custom-protocol -- ~/Pictures/photo.png

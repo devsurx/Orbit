@@ -4,7 +4,9 @@
 //!
 //! * a **tray icon**, so Orbit is reachable on machines where global hotkeys or
 //!   Shift-drag are unavailable (Wayland, locked-down macOS);
-//! * a **global hotkey**, the universal fallback trigger on every platform;
+//! * a **trigger**: an in-process global hotkey where the platform allows one,
+//!   plus single-instance handling so a *compositor* binding can drive Orbit
+//!   where it does not (Wayland — see the README);
 //! * the **overlay window**, a real drop target that renders the ring.
 //!
 //! Every decision — which petals exist, what they do, why one is greyed out —
@@ -14,6 +16,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -31,7 +34,7 @@ const RING: &str = "ring";
 /// Default trigger. Every platform can have this, even where Shift-drag cannot.
 const HOTKEY: &str = "CmdOrCtrl+Shift+Space";
 /// Ring diameter; must match the window size in `tauri.conf.json`.
-const RING_SIZE: f64 = 560.0;
+const RING_SIZE: f64 = 640.0;
 /// Event carrying the current ring contents to the webview.
 const MENU_EVENT: &str = "orbit://menu";
 /// Event carrying drag-hover state, so the ring can light up before a drop.
@@ -217,12 +220,52 @@ fn show_ring<R: Runtime>(app: &AppHandle<R>) {
 /// File paths given on the command line: the "Open with Orbit" / "Send to"
 /// route, and the easy way to poke at the ring during development.
 fn cli_paths() -> Vec<PathBuf> {
-    std::env::args_os()
-        .skip(1)
-        .map(PathBuf::from)
+    selection_from_args(std::env::args_os().skip(1))
+}
+
+/// Turn command-line words into a selection, ignoring flags and anything that
+/// does not exist on disk.
+///
+/// Used both for our own arguments and for the ones a second launch hands to the
+/// already-running instance, so a compositor binding carrying a path works.
+fn selection_from_args<I, S>(args: I) -> Vec<PathBuf>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    args.into_iter()
+        .map(|arg| PathBuf::from(arg.as_ref()))
         .filter(|path| !path.to_string_lossy().starts_with('-'))
         .filter(|path| path.exists())
         .collect()
+}
+
+/// Whether this session is Wayland, where a client cannot own a global hotkey.
+fn on_wayland() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+/// Register the in-process hotkey, if this platform can actually deliver one.
+///
+/// `global-hotkey` is X11-only on Linux: under Wayland the grab is accepted at
+/// the X protocol level and then never fires, because the compositor owns input.
+/// That silent success is worse than a failure, so say so out loud and point at
+/// the compositor binding instead of leaving the user pressing keys at nothing.
+fn register_hotkey<R: Runtime>(app: &AppHandle<R>) {
+    match app.global_shortcut().register(HOTKEY) {
+        Ok(()) if on_wayland() => {
+            eprintln!(
+                "orbit: hotkey {HOTKEY} cannot work on Wayland (the compositor owns \
+                 global input).\n\
+                 orbit: bind Orbit in your compositor instead — see \"Global hotkeys \
+                 on Wayland\" in the README."
+            );
+        }
+        Ok(()) => {}
+        Err(error) => {
+            eprintln!("orbit: could not register {HOTKEY} ({error}); use the tray icon.");
+        }
+    }
 }
 
 /// Centre the window on the pointer, which is what makes this feel radial.
@@ -280,6 +323,28 @@ fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 fn main() {
     tauri::Builder::default()
+        // Registered first: it decides whether this process is the owner of the
+        // app or a request to an instance that already exists.
+        //
+        // This is what makes a compositor binding viable. Wayland forbids global
+        // hotkeys, but it does not forbid *launching* Orbit, so `bind = ... ,
+        // exec, orbit-app` becomes a working trigger — as long as the second
+        // launch hands its files over and exits instead of adding another tray
+        // icon and another overlay.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            eprintln!("orbit: already running — handing the request to the live instance");
+            if let Some(orbit) = app.try_state::<Orbit>() {
+                // `argv[0]` is the executable itself, not a file the user picked.
+                let paths = selection_from_args(argv.into_iter().skip(1));
+                if !paths.is_empty() {
+                    eprintln!("orbit: compositor binding carried {} path(s)", paths.len());
+                    if let Ok(mut last) = orbit.last_drop.lock() {
+                        *last = paths;
+                    }
+                }
+            }
+            show_ring(app);
+        }))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -304,7 +369,7 @@ fn main() {
 
             app.manage(orbit);
             setup_tray(app.handle())?;
-            app.global_shortcut().register(HOTKEY)?;
+            register_hotkey(app.handle());
 
             // macOS: no dock icon, no space in the app switcher.
             #[cfg(target_os = "macos")]

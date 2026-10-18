@@ -15,8 +15,8 @@
       {
         "label": "ring",
         "title": "Orbit",
-        "width": 560,
-        "height": 560,
+        "width": 640,
+        "height": 640,
         "resizable": false,
         "decorations": false,
         "transparent": true,

@@ -5,8 +5,8 @@
       {
         "label": "ring",
         "title": "Orbit",
-        "width": 560,
-        "height": 560,
+        "width": 640,
+        "height": 640,
         "resizable": false,
         "decorations": false,
         "transparent": false,
@@ -14,7 +14,8 @@
         "skipTaskbar": true,
         "visible": false,
         "shadow": false,
-        "focus": true
+        "focus": true,
+        "backgroundColor": "#0b0b12"
       }
     ]
   }

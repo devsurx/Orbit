@@ -16,6 +16,7 @@ orbit-registry = { path = "../orbit-registry" }
 serde = { workspace = true }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
 
 [features]
 # Switches Tauri from the dev server to the frontend embedded in the binary.
