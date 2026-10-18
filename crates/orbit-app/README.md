@@ -28,6 +28,7 @@ renders the ring. It contains **no conversion logic** — every decision comes f
 | Petal pick → concrete jobs | `dispatch` → `orbit_jobs::resolve_pick` |
 | Worker pool, ids, shutdown | `Jobs` struct, built in `setup` |
 | Progress → webview | the `Runner` emitter, `emit_to(RING, JOB_EVENT, …)` |
+| Published paths → stderr, which `scripts/orbit` captures | `announce` |
 | Window hidden on close instead of quitting | `WindowEvent::CloseRequested` |
 
 ## IPC contract
@@ -58,6 +59,12 @@ A pick that suits only *some* of the dragged files still succeeds: `DispatchAck`
 reports the count and the first reason in `detail`. The ring only leaves the screen
 once nothing is in flight — and it **stays** up when something failed, so the
 reason is readable instead of being swallowed.
+
+When a job finishes, `announce` writes `orbit: wrote <absolute path>` to standard
+error. The ring says the same thing for about a second; standard error is the copy
+that survives, and [`scripts/orbit`](../../scripts/orbit) appends it to
+`~/.local/state/orbit/jobs.log`. Publishing a file somewhere the user cannot find
+again is not "done".
 
 ## Running it
 

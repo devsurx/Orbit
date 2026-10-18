@@ -193,6 +193,24 @@ The ring starts **hidden** on purpose: Orbit is a background utility, not a
 window you go looking for. It stays on top until you dismiss it with
 <kbd>Esc</kbd> or a click outside.
 
+### ⌨️ The `orbit` command
+
+[`scripts/orbit`](scripts/orbit) is a small launcher that reduces all of that to
+one word:
+
+```bash
+ln -s "$PWD/scripts/orbit" ~/.local/bin/orbit    # once, if ~/.local/bin is on PATH
+
+orbit ~/Pictures/photo.png   # open the ring for these files
+orbit                        # reopen the ring for the last selection
+orbit --log                  # what was published, and where
+```
+
+It resolves paths, detaches so your shell comes straight back, and appends every
+published file — by absolute path — to `~/.local/state/orbit/jobs.log`. That file
+is the durable answer to *"where did my file go?"*; the ring only says it for a
+second or so. It is local, created only by this launcher, and safe to delete.
+
 > ⚠️ **`--features custom-protocol` is not optional for a real binary.** Without
 > it Tauri builds in *dev mode* and loads `devUrl` (`http://localhost:1420`), so
 > you get a window with nothing in it unless the Vite dev server happens to be
@@ -257,6 +275,8 @@ petal pick ─▶ resolve ─▶ plan ─▶ worker pool ─▶ publish ─▶ o
   | Audio from video | `clip (audio).mp3` |
   | Trim | `clip (trimmed).mp4` |
 
+- **Where it went:** always next to the source file. `orbit --log` prints the
+  paths of everything Orbit has published, if you would rather not go looking.
 - **An existing file is never overwritten.** If the name is taken you get
   `photo (converted 2).webp`, and the original bytes are untouched.
 - **Writes are atomic.** The result is built as a hidden `.orbit-*` scratch file
@@ -303,6 +323,7 @@ Orbit/
 │   │   └── src/runner.rs     #    worker pool, cancellation, progress
 │   ├── orbit-app/            # 🪟 Tauri shell: tray, hotkey, overlay, pool (M1–M2)
 │   └── orbit-cli/            # ⌨️  headless `orbit convert …`            (M5)
+├── scripts/orbit             # ⌨️  `orbit [file …]` launcher + job log
 └── src/                      # ⚛️  React + Vite + Tailwind radial UI      (M1–M2)
 ```
 

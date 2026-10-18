@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orbit_jobs::{Job, Pick, PickKind, Runner, resolve_pick};
+use orbit_jobs::{Job, JobEvent, JobState, Pick, PickKind, Runner, resolve_pick};
 use orbit_registry::{
     EngineStatus, MenuModel, MenuRequest, Petal, PetalKind, Registry, SourceFile,
 };
@@ -189,6 +189,21 @@ fn detect_engines(registry: &Registry) -> BTreeMap<String, EngineStatus> {
         orbit_registry::host_platform(),
         std::env::var("PATH").ok().as_deref(),
     )
+}
+
+/// Echo a job that reached a terminal state to standard error.
+///
+/// The ring shows the result for about a second, which is not long enough to
+/// find a file a minute later. The `orbit` launcher captures this stream into
+/// `~/.local/state/orbit/jobs.log`, so every published path is recorded even
+/// once the ring has faded.
+fn announce(event: &JobEvent) {
+    match &event.state {
+        JobState::Done { path } => eprintln!("orbit: wrote {}", path.display()),
+        JobState::Failed { message } => eprintln!("orbit: failed {} — {message}", event.label),
+        JobState::Cancelled => eprintln!("orbit: cancelled {}", event.label),
+        JobState::Queued | JobState::Running { .. } => {}
+    }
 }
 
 /// The pick kind a ring petal stands for.
@@ -540,6 +555,7 @@ fn main() {
             let handle = app.handle().clone();
             app.manage(Jobs {
                 runner: Mutex::new(Runner::new(worker_count(), move |event| {
+                    announce(&event);
                     let _ = handle.emit_to(RING, JOB_EVENT, event);
                 })),
                 next_id: AtomicU64::new(1),

@@ -194,6 +194,8 @@ interface Progress {
   cancelled: number;
   /** Mean completion of the jobs that report it, or null when none do. */
   percent: number | null;
+  /** Where the finished ones were published, in completion order. */
+  outputs: string[];
   /** First failure message, for the one-line summary. */
   firstError: string | null;
 }
@@ -205,6 +207,7 @@ const NOTHING: Progress = {
   failed: 0,
   cancelled: 0,
   percent: null,
+  outputs: [],
   firstError: null,
 };
 
@@ -219,6 +222,7 @@ function summarise(jobs: Map<number, JobEvent>): Progress {
   let cancelled = 0;
   let percentTotal = 0;
   let percentCount = 0;
+  const outputs: string[] = [];
   let firstError: string | null = null;
 
   for (const job of jobs.values()) {
@@ -235,6 +239,7 @@ function summarise(jobs: Map<number, JobEvent>): Progress {
         break;
       case "done":
         done += 1;
+        outputs.push(job.path);
         break;
       case "failed":
         failed += 1;
@@ -253,8 +258,21 @@ function summarise(jobs: Map<number, JobEvent>): Progress {
     failed,
     cancelled,
     percent: percentCount > 0 ? percentTotal / percentCount : null,
+    outputs,
     firstError,
   };
+}
+
+/** Last path segment of a path, for naming a file or a folder. */
+function lastSegment(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : path;
+}
+
+/** The folder a published file landed in: "Pictures", not the full path. */
+function folderOf(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 2] : "/";
 }
 
 /** One line describing a batch, or null when there is nothing to say. */
@@ -273,7 +291,16 @@ function progressLine(progress: Progress): string | null {
   if (progress.cancelled === progress.total) {
     return `${progress.total} cancelled`;
   }
-  return `${progress.done} file${progress.done === 1 ? "" : "s"} done`;
+
+  // Everything landed. A single result is named; a batch says which folder,
+  // because the files are written *beside their sources* and that is the one
+  // thing worth confirming before the ring goes away.
+  if (progress.outputs.length === 1) {
+    return lastSegment(progress.outputs[0]);
+  }
+  const folders = new Set(progress.outputs.map(folderOf));
+  const where = folders.size === 1 ? ` in ${[...folders][0]}` : "";
+  return `${progress.done} files${where}`;
 }
 
 interface HubProps {

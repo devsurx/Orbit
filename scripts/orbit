@@ -1,0 +1,83 @@
+#!/bin/sh
+# Orbit launcher: `orbit [file …]`
+#
+# Summons the ring for the given files, or reopens the last selection when given
+# none. It detaches, because a background utility you have to Ctrl-C is not a
+# background utility — and because a *second* launch is handed to the running
+# instance by Orbit's single-instance support, which is what makes this safe to
+# call from a compositor keybinding.
+#
+# Job outcomes are appended to $XDG_STATE_HOME/orbit/jobs.log (usually
+# ~/.local/state/orbit/jobs.log), which is where to look when the ring has
+# already faded: every published file is logged by absolute path.
+
+set -eu
+
+ROOT="${ORBIT_ROOT:-$HOME/orbit}"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}"
+LOG="$STATE/orbit/jobs.log"
+
+usage() {
+    cat <<EOF
+Usage: orbit [file …]
+
+  orbit              reopen the ring for the last selection
+  orbit FILE …       open the ring for these files
+
+Results are written *beside each source* as "name (converted).ext", never
+overwriting anything. Each one is also logged to:
+  $LOG
+
+Orbit's global hotkey does not work on Wayland. Bind this command in your
+compositor instead, or use the tray icon.
+EOF
+}
+
+case "${1:-}" in
+-h | --help)
+    usage
+    exit 0
+    ;;
+--log)
+    exec "${PAGER:-less}" "$LOG"
+    ;;
+esac
+
+# Prefer a release build; fall back to the debug one.
+BIN="${ORBIT_BIN:-}"
+if [ -z "$BIN" ]; then
+    for candidate in "$ROOT/target/release/orbit-app" "$ROOT/target/debug/orbit-app"; do
+        if [ -x "$candidate" ]; then
+            BIN="$candidate"
+            break
+        fi
+    done
+fi
+
+if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then
+    echo "orbit: no build found under $ROOT/target" >&2
+    echo "       build one with:" >&2
+    echo "       cd $ROOT && npm run build && cargo build -p orbit-app --features custom-protocol" >&2
+    exit 1
+fi
+
+# Absolute paths, because the result is named after the source and written
+# beside it — "beside" must not depend on the working directory. Rotating the
+# positional parameters keeps arguments that contain spaces intact.
+count=$#
+index=0
+while [ "$index" -lt "$count" ]; do
+    first="$1"
+    shift
+    set -- "$@" "$(realpath -- "$first" 2>/dev/null || printf '%s' "$first")"
+    index=$((index + 1))
+done
+
+mkdir -p "$STATE/orbit"
+{
+    printf '%s orbit %s\n' "$(date -Is)" "$*"
+} >>"$LOG"
+
+# Detached: no controlling terminal, no stdin, quiet in the shell that started it.
+# Everything the app prints still lands in the log above.
+setsid "$BIN" "$@" >>"$LOG" 2>&1 </dev/null &
