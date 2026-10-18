@@ -1,0 +1,58 @@
+[
+  {
+    "id": "convert",
+    "label": "Convert",
+    "icon": "arrows-shuffle",
+    "order": 0,
+    "accent": "primary",
+    "description": "Change the format without touching anything else."
+  },
+  {
+    "id": "compress",
+    "label": "Compress",
+    "icon": "compress",
+    "order": 1,
+    "accent": "primary",
+    "description": "Make it smaller, by quality or by target size."
+  },
+  {
+    "id": "trim",
+    "label": "Trim",
+    "icon": "scissors",
+    "order": 2,
+    "accent": "primary",
+    "description": "Cut a section out of audio or video."
+  },
+  {
+    "id": "crop",
+    "label": "Crop",
+    "icon": "crop",
+    "order": 3,
+    "accent": "primary",
+    "description": "Reframe the picture, or resize it."
+  },
+  {
+    "id": "merge",
+    "label": "Merge",
+    "icon": "stack",
+    "order": 4,
+    "accent": "primary",
+    "description": "Join several files into one."
+  },
+  {
+    "id": "extract",
+    "label": "Extract",
+    "icon": "download",
+    "order": 5,
+    "accent": "primary",
+    "description": "Pull audio, frames or pages out of a file."
+  },
+  {
+    "id": "more",
+    "label": "More",
+    "icon": "dots",
+    "order": 6,
+    "accent": "muted",
+    "description": "Privacy, rotation, OCR and everything else."
+  }
+]

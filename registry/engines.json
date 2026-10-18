@@ -1,0 +1,179 @@
+[
+  {
+    "id": "orbit-native",
+    "label": "Orbit (built in)",
+    "embedded": true,
+    "license": "MPL-2.0",
+    "distribution": "bundled",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "windows-arm64", "linux-x64", "linux-arm64"],
+    "provides": [
+      "op:resize", "op:crop", "op:rotate", "op:flip", "op:grayscale",
+      "op:strip_metadata", "op:append", "op:thumbnail", "op:compress",
+      "op:image_layout", "op:tabular_convert", "op:markup"
+    ],
+    "progress": "none",
+    "cost": 1,
+    "note": "Rust code compiled into Orbit: basic geometry, metadata stripping, tabular and markup conversion. No sidecar, always available, used when a heavier engine is missing."
+  },
+  {
+    "id": "vips",
+    "label": "libvips",
+    "binary": "vips",
+    "version_args": ["--version"],
+    "min_version": "8.14",
+    "license": "LGPL-2.1-or-later",
+    "distribution": "bundled",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"],
+    "provides": [
+      "op:raster", "op:resize", "op:crop", "op:rotate", "op:flip",
+      "op:grayscale", "op:compress", "op:strip_metadata", "op:thumbnail",
+      "op:append"
+    ],
+    "progress": "none",
+    "cost": 2,
+    "note": "Preferred image engine: fastest and lowest memory for large images. Needs a build with libheif for HEIC reading."
+  },
+  {
+    "id": "magick",
+    "label": "ImageMagick",
+    "binary": "magick",
+    "alternate_binaries": ["convert", "convert-im6.q16"],
+    "version_args": ["-version"],
+    "min_version": "7.0",
+    "license": "ImageMagick",
+    "distribution": "bundled",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "windows-arm64", "linux-x64", "linux-arm64"],
+    "provides": [
+      "op:raster", "op:resize", "op:crop", "op:rotate", "op:flip",
+      "op:grayscale", "op:compress", "op:strip_metadata", "op:thumbnail",
+      "op:append", "op:image_layout", "op:pdf_render"
+    ],
+    "progress": "none",
+    "cost": 3,
+    "note": "Broadest format coverage, including DDS/XCF/JP2/camera RAW. The fallback when libvips is unavailable or cannot read a format."
+  },
+  {
+    "id": "ffmpeg",
+    "label": "FFmpeg",
+    "binary": "ffmpeg",
+    "probe_binary": "ffprobe",
+    "alternate_binaries": ["ffmpeg"],
+    "version_args": ["-version"],
+    "min_version": "6.0",
+    "license": "LGPL-2.1-or-later",
+    "distribution": "bundled",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "windows-arm64", "linux-x64", "linux-arm64"],
+    "provides": [
+      "op:trim", "op:crop", "op:resize", "op:rotate", "op:flip",
+      "op:grayscale", "op:compress", "op:strip_metadata", "op:thumbnail",
+      "op:extract_audio", "op:extract_frames", "op:concat", "op:mux",
+      "op:palette", "op:visualize", "op:slideshow"
+    ],
+    "progress": "keyvalue",
+    "cost": 3,
+    "note": "All video and audio work. Must be an LGPL build, not a GPL one, to keep redistribution simple. ffprobe supplies durations, stream and codec data."
+  },
+  {
+    "id": "libheif",
+    "label": "libheif (heif-convert)",
+    "binary": "heif-convert",
+    "version_args": ["--version"],
+    "license": "LGPL-3.0",
+    "distribution": "bundled",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"],
+    "provides": ["op:raster"],
+    "progress": "none",
+    "cost": 2,
+    "note": "Decodes HEIC/HEIF and writes only PNG or JPEG, so it is preferred for those two targets and skipped for anything else."
+  },
+  {
+    "id": "qpdf",
+    "label": "qpdf",
+    "binary": "qpdf",
+    "version_args": ["--version"],
+    "license": "Apache-2.0",
+    "distribution": "bundled",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"],
+    "provides": ["op:pdf_merge", "op:pdf_split", "op:pdf_compress", "op:pdf_linearize", "op:pdf_encrypt", "op:pdf_rotate", "op:strip_metadata"],
+    "progress": "none",
+    "cost": 1,
+    "note": "Lossless PDF structure work: merge, split, linearise, compress streams without re-rasterising. Permissively licensed, so it is the default PDF engine."
+  },
+  {
+    "id": "poppler",
+    "label": "Poppler utilities",
+    "binary": "pdftoppm",
+    "alternate_binaries": ["pdftocairo"],
+    "related_binaries": ["pdftotext", "pdfimages", "pdfinfo"],
+    "version_args": ["-v"],
+    "license": "GPL-2.0-only",
+    "distribution": "system",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"],
+    "provides": ["op:pdf_render", "op:pdf_text", "op:pdf_images"],
+    "progress": "none",
+    "cost": 2,
+    "note": "Ships with most Linux distributions and with Orbit's macOS/Windows bundles. Spawned as a separate process; GPL obligations are documented in THIRD_PARTY_LICENSES."
+  },
+  {
+    "id": "libreoffice",
+    "label": "LibreOffice (headless)",
+    "binary": "soffice",
+    "alternate_binaries": ["soffice.bin", "libreoffice"],
+    "version_args": ["--version"],
+    "min_version": "7.6",
+    "license": "MPL-2.0",
+    "distribution": "system",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"],
+    "provides": [
+      "op:doc_convert", "op:page_layout", "op:image_layout",
+      "op:tabular_convert", "op:doc_render", "op:markup", "op:epub"
+    ],
+    "progress": "line",
+    "cost": 5,
+    "note": "Office documents and PDF export. First start costs seconds, so Orbit keeps one warm headless listener rather than spawning per job."
+  },
+  {
+    "id": "pandoc",
+    "label": "Pandoc",
+    "binary": "pandoc",
+    "version_args": ["--version"],
+    "min_version": "3.0",
+    "license": "GPL-2.0-or-later",
+    "distribution": "bundled",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"],
+    "provides": [
+      "op:doc_convert", "op:markup", "op:epub", "op:template"
+    ],
+    "progress": "none",
+    "cost": 2,
+    "note": "Best Markdown/HTML/EPUB fidelity. Deliberately not used for ->PDF, which would drag in a TeX engine."
+  },
+  {
+    "id": "ghostscript",
+    "label": "Ghostscript",
+    "binary": "gs",
+    "version_args": ["--version"],
+    "min_version": "10.0",
+    "license": "AGPL-3.0-only",
+    "distribution": "optional",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"],
+    "provides": ["op:pdf_compress", "op:pdf_merge", "op:pdf_render"],
+    "progress": "line",
+    "cost": 4,
+    "note": "AGPL, so it is detected but never bundled: stronger PDF compression than qpdf is offered only if the user already has it or opts in."
+  },
+  {
+    "id": "tesseract",
+    "label": "Tesseract OCR",
+    "binary": "tesseract",
+    "version_args": ["--version"],
+    "min_version": "5.0",
+    "license": "Apache-2.0",
+    "distribution": "optional",
+    "platforms": ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"],
+    "provides": ["op:ocr"],
+    "progress": "line",
+    "cost": 6,
+    "note": "Scanned PDF or image to text or searchable PDF. Language packs are downloaded only when the user enables OCR."
+  }
+]

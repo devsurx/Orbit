@@ -1,0 +1,79 @@
+[
+  {
+    "id": "web-ready",
+    "label": "Web ready",
+    "icon": "sparkle",
+    "category": "convert",
+    "applies_to": [{ "kind": "image" }],
+    "pin": 1,
+    "steps": [
+      { "action": "resize", "options": { "resize_mode": "max_dim", "max_dim": 1600 } },
+      { "action": "convert", "options": { "to": "webp", "quality": 82 } },
+      { "action": "strip_metadata", "options": {} }
+    ],
+    "note": "Shrink to 1600px, convert to WebP, drop the metadata. The single most requested recipe."
+  },
+  {
+    "id": "email-ready",
+    "label": "Email ready",
+    "icon": "mail",
+    "category": "compress",
+    "applies_to": [{ "kind": "image" }, { "format": "pdf" }],
+    "pin": 2,
+    "steps": [
+      { "action": "compress", "options": { "compress_mode": "target_size", "target_size": 5242880 } },
+      { "action": "strip_metadata", "options": {} }
+    ],
+    "note": "Under 5 MB, with the metadata gone."
+  },
+  {
+    "id": "square-post",
+    "label": "Square post",
+    "icon": "square",
+    "category": "crop",
+    "applies_to": [{ "kind": "image" }],
+    "steps": [
+      { "action": "resize", "options": { "resize_mode": "preset", "resize_preset": "square_1080" } },
+      { "action": "compress", "options": { "quality": 80 } },
+      { "action": "strip_metadata", "options": {} }
+    ],
+    "note": "1080x1080 and small enough to upload."
+  },
+  {
+    "id": "podcast-clip",
+    "label": "Podcast clip",
+    "icon": "mic",
+    "category": "extract",
+    "applies_to": [{ "kind": "video" }, { "kind": "audio" }],
+    "steps": [
+      { "action": "trim", "options": { "start": 0, "end": 60 } },
+      { "action": "compress", "options": { "quality": 70 } },
+      { "action": "strip_metadata", "options": {} }
+    ],
+    "note": "First minute, compressed for speech, metadata gone. Works for video and audio alike. Loudness normalisation is offered by Extract > Audio from video."
+  },
+  {
+    "id": "gif-clip",
+    "label": "GIF clip",
+    "icon": "gif",
+    "category": "convert",
+    "applies_to": [{ "kind": "video" }],
+    "steps": [
+      { "action": "trim", "options": { "start": 0, "end": 5 } },
+      { "action": "convert", "options": { "to": "gif", "fps": 15, "width": 480 } }
+    ],
+    "note": "Five seconds, 480px wide, silent."
+  },
+  {
+    "id": "spreadsheet-to-json",
+    "label": "Sheet to JSON",
+    "icon": "table",
+    "category": "convert",
+    "applies_to": [{ "kind": "data" }, { "format": "xlsx" }, { "format": "ods" }],
+    "steps": [
+      { "action": "convert", "options": { "to": "csv", "header": true } },
+      { "action": "convert", "options": { "to": "json", "header": true } }
+    ],
+    "note": "Two hops, because a spreadsheet is read by LibreOffice and CSV to JSON is done in-process."
+  }
+]

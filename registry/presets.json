@@ -1,0 +1,30 @@
+[
+  {
+    "id": "avatar-256",
+    "label": "Avatar 256",
+    "icon": "user",
+    "category": "more",
+    "source": "seed",
+    "applies_to": [{ "kind": "image" }],
+    "steps": [
+      { "action": "resize", "options": { "resize_mode": "preset", "resize_preset": "thumbnail" } },
+      { "action": "convert", "options": { "to": "png" } },
+      { "action": "strip_metadata", "options": {} }
+    ],
+    "note": "Profile pictures: square thumbnail, PNG, no metadata. Seeded example of a saved preset."
+  },
+  {
+    "id": "grayscale-scan",
+    "label": "Grayscale scan",
+    "icon": "contrast",
+    "category": "more",
+    "source": "seed",
+    "applies_to": [{ "kind": "image" }],
+    "steps": [
+      { "action": "grayscale", "options": {} },
+      { "action": "compress", "options": { "quality": 75 } },
+      { "action": "strip_metadata", "options": {} }
+    ],
+    "note": "Scanned documents: desaturated, shrunk, and cleared of scanner metadata. Seeded example of a saved preset."
+  }
+]

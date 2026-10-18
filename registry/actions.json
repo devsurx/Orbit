@@ -1,0 +1,228 @@
+[
+  {
+    "id": "convert",
+    "label": "Convert to…",
+    "category": "convert",
+    "icon": "arrows-shuffle",
+    "applies_to": [],
+    "engines": {},
+    "options": ["to", "*"],
+    "defaults": {},
+    "rank": 100,
+    "ring": false,
+    "note": "The generic convert action. Format-specific petals are built from conversions.json; this one powers the command palette (\"png to webp\") and chains, where the target is chosen at run time. The \"*\" option entry means \"whatever the resolved conversion rule exposes\".",
+    "resolves_via": "conversions"
+  },
+  {
+    "id": "compress",
+    "label": "Compress",
+    "category": "compress",
+    "icon": "compress",
+    "applies_to": [
+      { "kind": "image" },
+      { "kind": "video" },
+      { "kind": "audio" },
+      { "format": "pdf" }
+    ],
+    "engines": {
+      "image": ["vips", "magick", "orbit-native"],
+      "video": ["ffmpeg"],
+      "audio": ["ffmpeg"],
+      "pdf": ["qpdf", "ghostscript"]
+    },
+    "requires": {
+      "image": ["op:compress"],
+      "video": ["op:compress"],
+      "audio": ["op:compress"],
+      "pdf": ["op:pdf_compress"]
+    },
+    "options": ["compress_mode", "quality", "target_size", "strip_metadata"],
+    "defaults": { "compress_mode": "quality", "quality": 78, "target_size": 10485760 },
+    "rank": 90
+  },
+  {
+    "id": "merge",
+    "label": "Merge",
+    "category": "merge",
+    "icon": "stack",
+    "applies_to": [
+      { "format": "pdf" },
+      { "kind": "image" },
+      { "kind": "video" },
+      { "kind": "audio" }
+    ],
+    "engines": {
+      "pdf": ["qpdf", "ghostscript", "magick"],
+      "image": ["magick", "orbit-native"],
+      "video": ["ffmpeg"],
+      "audio": ["ffmpeg"]
+    },
+    "requires": {
+      "pdf": ["op:pdf_merge"],
+      "image": ["op:image_layout"],
+      "video": ["op:concat"],
+      "audio": ["op:concat"]
+    },
+    "options": ["merge_output", "merge_order", "quality"],
+    "defaults": { "merge_output": "pdf", "merge_order": "as_dragged" },
+    "requires_files": 2,
+    "rank": 85,
+    "note": "Needs at least two files: PDFs become one PDF, images one PDF or GIF, video and audio are concatenated in drag order."
+  },
+  {
+    "id": "trim",
+    "label": "Trim",
+    "category": "trim",
+    "icon": "scissors",
+    "applies_to": [{ "kind": "video" }, { "kind": "audio" }],
+    "engines": { "video": ["ffmpeg"], "audio": ["ffmpeg"] },
+    "requires": { "video": ["op:trim"], "audio": ["op:trim"] },
+    "options": ["start", "end"],
+    "defaults": { "start": 0, "end": null },
+    "rank": 80,
+    "note": "Opens a waveform or filmstrip so the section is picked visually, with times editable to the frame."
+  },
+  {
+    "id": "extract_audio",
+    "label": "Audio from video",
+    "category": "extract",
+    "icon": "music",
+    "applies_to": [{ "kind": "video" }],
+    "engines": { "video": ["ffmpeg"] },
+    "requires": { "video": ["op:extract_audio"] },
+    "options": ["audio_bitrate", "sample_rate", "channels", "normalize"],
+    "defaults": { "audio_bitrate": "192000", "normalize": false },
+    "rank": 70
+  },
+  {
+    "id": "extract_pages",
+    "label": "Pages from PDF",
+    "category": "extract",
+    "icon": "file-text",
+    "applies_to": [{ "format": "pdf" }],
+    "engines": { "pdf": ["qpdf", "poppler"] },
+    "requires": { "pdf": ["op:pdf_split"] },
+    "options": ["pages"],
+    "defaults": { "pages": "1-" },
+    "rank": 60,
+    "note": "One file per page or per range, written next to the original."
+  },
+  {
+    "id": "extract_frames",
+    "label": "Frames from video",
+    "category": "extract",
+    "icon": "film",
+    "applies_to": [{ "kind": "video" }],
+    "engines": { "video": ["ffmpeg"] },
+    "requires": { "video": ["op:extract_frames"] },
+    "options": ["time", "count", "scale"],
+    "defaults": { "time": 1, "count": 1 },
+    "rank": 55
+  },
+  {
+    "id": "resize",
+    "label": "Resize",
+    "category": "crop",
+    "icon": "maximize",
+    "applies_to": [{ "kind": "image" }, { "kind": "video" }],
+    "engines": { "image": ["vips", "magick", "orbit-native"], "video": ["ffmpeg"] },
+    "requires": { "image": ["op:resize"], "video": ["op:resize"] },
+    "options": ["resize_mode", "percent", "max_dim", "resize_preset"],
+    "defaults": { "resize_mode": "max_dim", "max_dim": 1920 },
+    "rank": 60
+  },
+  {
+    "id": "crop",
+    "label": "Crop",
+    "category": "crop",
+    "icon": "crop",
+    "applies_to": [{ "kind": "image" }, { "kind": "video" }],
+    "engines": { "image": ["vips", "magick", "orbit-native"], "video": ["ffmpeg"] },
+    "requires": { "image": ["op:crop"], "video": ["op:crop"] },
+    "options": ["region", "aspect"],
+    "defaults": { "region": null, "aspect": "free" },
+    "rank": 50,
+    "note": "Opens a preview with a draggable box and aspect-ratio presets."
+  },
+  {
+    "id": "strip_metadata",
+    "label": "Remove metadata",
+    "category": "more",
+    "icon": "shield",
+    "applies_to": [
+      { "kind": "image" },
+      { "kind": "video" },
+      { "kind": "audio" },
+      { "format": "pdf" }
+    ],
+    "engines": {
+      "image": ["vips", "magick", "orbit-native"],
+      "video": ["ffmpeg"],
+      "audio": ["ffmpeg"],
+      "pdf": ["qpdf"]
+    },
+    "requires": {
+      "image": ["op:strip_metadata"],
+      "video": ["op:strip_metadata"],
+      "audio": ["op:strip_metadata"],
+      "pdf": ["op:strip_metadata"]
+    },
+    "options": [],
+    "defaults": {},
+    "rank": 40,
+    "note": "Drops EXIF, GPS, camera, author and software tags. Writes a new file, never edits in place."
+  },
+  {
+    "id": "ocr",
+    "label": "Read text (OCR)",
+    "category": "more",
+    "icon": "scan-text",
+    "applies_to": [{ "kind": "image" }, { "format": "pdf" }],
+    "engines": { "image": ["tesseract"], "pdf": ["tesseract"] },
+    "requires": { "image": ["op:ocr"], "pdf": ["op:ocr"] },
+    "options": ["ocr_lang", "ocr_output", "pages"],
+    "defaults": { "ocr_lang": "auto", "ocr_output": "txt" },
+    "rank": 30,
+    "note": "Fully offline. Language data is fetched once, only if OCR is used."
+  },
+  {
+    "id": "rotate",
+    "label": "Rotate",
+    "category": "more",
+    "icon": "rotate",
+    "applies_to": [{ "kind": "image" }, { "kind": "video" }, { "format": "pdf" }],
+    "engines": {
+      "image": ["vips", "magick", "orbit-native"],
+      "video": ["ffmpeg"],
+      "pdf": ["qpdf", "magick"]
+    },
+    "requires": { "image": ["op:rotate"], "video": ["op:rotate"], "pdf": ["op:pdf_rotate"] },
+    "options": ["rotate"],
+    "defaults": { "rotate": "90" },
+    "rank": 20
+  },
+  {
+    "id": "flip",
+    "label": "Flip",
+    "category": "more",
+    "icon": "flip",
+    "applies_to": [{ "kind": "image" }, { "kind": "video" }],
+    "engines": { "image": ["vips", "magick", "orbit-native"], "video": ["ffmpeg"] },
+    "requires": { "image": ["op:flip"], "video": ["op:flip"] },
+    "options": ["flip_axis"],
+    "defaults": { "flip_axis": "horizontal" },
+    "rank": 15
+  },
+  {
+    "id": "grayscale",
+    "label": "Black and white",
+    "category": "more",
+    "icon": "contrast",
+    "applies_to": [{ "kind": "image" }, { "kind": "video" }],
+    "engines": { "image": ["vips", "magick", "orbit-native"], "video": ["ffmpeg"] },
+    "requires": { "image": ["op:grayscale"], "video": ["op:grayscale"] },
+    "options": [],
+    "defaults": {},
+    "rank": 10
+  }
+]
