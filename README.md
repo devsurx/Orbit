@@ -77,11 +77,22 @@ by design, so we say so instead of shipping something flaky.
 | **Windows 10/11** | ✅ | hotkey · tray · palette | Low-level mouse/keyboard hooks + drop overlay. |
 | **macOS 12+** | ✅ | hotkey · tray · palette | `NSEvent` monitors; needs Accessibility permission. |
 | **Linux — X11** | ✅ | hotkey · tray · palette | XInput2 / XRecord + XDND. Tested via XWayland too. |
-| **Linux — Wayland** | ⚠️ | hotkey · tray · palette · Open with | Clients cannot see global Shift-drag. Documented, not faked. |
+| **Linux — Wayland** | ⚠️ | tray · palette · Open with · compositor binding | No global Shift-drag **and no global hotkey** — the platform forbids both. |
 
-> ⚠️ On Wayland the global-hotkey and shell integrations are **first-class**, not
-> consolation prizes: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> puts the
-> ring wherever your pointer is.
+> ⚠️ **Wayland has no global hotkey path at all.** Orbit's hotkey goes through
+> `XGrabKey`, which Wayland deliberately makes inert: the compositor owns input,
+> and XWayland only sees events for the focused X11 window. The grab even
+> *succeeds*, so the failure is silent.
+>
+> On Wayland, bind Orbit in your compositor instead — that is the supported
+> mechanism. For Hyprland:
+>
+> ```ini
+> bind = CTRL SHIFT, SPACE, exec, orbit-app
+> ```
+>
+> This requires single-instance handling (M4) so the binding summons the running
+> app rather than spawning a second copy.
 
 ### 🪟 Known limitation: translucent windows on Linux
 
