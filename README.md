@@ -209,8 +209,8 @@ cargo run -p orbit-registry --example menu -- <your-ext>
 ```
 
 Adding a format or rule keeps `readers`/`writers` honest or the loader will tell
-you exactly what is wrong. See [`CONTRIBUTING.md`](CONTRIBUTING.md) (soon) and
-[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) (soon).
+you exactly what is wrong. A `CONTRIBUTING.md` and a `THIRD_PARTY_LICENSES.md`
+arrive with the packaging milestone.
 
 ## 📄 License
 
