@@ -1,0 +1,17 @@
+[package]
+name = "orbit-jobs"
+description = "Job planning and execution for Orbit: output naming, engine argv and a worker pool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+orbit-registry = { path = "../orbit-registry" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
