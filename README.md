@@ -12,7 +12,7 @@ tiny window, no "Save As" dialog, no upload, no account.
 [![License: MPL 2.0](https://img.shields.io/badge/license-MPL%202.0-6e4aff.svg)](https://www.mozilla.org/en-US/MPL/2.0/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2ea043.svg)](#-platform-support)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-dea584.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-M1%20in%20progress-f5a623.svg)](#-roadmap)
+[![Status](https://img.shields.io/badge/status-M1%20shipped-2ea043.svg)](#-roadmap)
 [![No telemetry](https://img.shields.io/badge/telemetry-none-2ea043.svg)](#-privacy)
 
 </div>
@@ -83,6 +83,20 @@ by design, so we say so instead of shipping something flaky.
 > consolation prizes: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> puts the
 > ring wherever your pointer is.
 
+### 🪟 Known limitation: translucent windows on Linux
+
+WebKitGTK cannot composite a transparent webview on Wayland — a
+`transparent: true` Tauri window is created but **never rendered**. Orbit handles
+this honestly rather than shipping a blank window:
+
+- `tauri.conf.json` keeps real translucency, which is what macOS and Windows
+  (WebView2) use.
+- [`tauri.linux.conf.json`](crates/orbit-app/tauri.linux.conf.json) overrides the
+  ring to an opaque window on Linux, where the ring paints its own dark panel.
+
+The result is a glassy ring on macOS/Windows and a solid dark one on Linux. We
+prefer that over a menu that does not appear at all.
+
 ## 🚀 Build from source
 
 **Prerequisites:** Rust 1.85+ (2024 edition), Node 20+, and the platform
@@ -125,6 +139,33 @@ cargo test -p orbit-registry
 cargo run -p orbit-registry --example menu -- mov png heic
 cargo run -p orbit-registry --example menu -- --pairs
 ```
+
+### ▶️ Running the desktop app
+
+```bash
+npm install          # once
+npm run build        # UI → ./dist, which Tauri embeds into the binary
+
+# Debug build. Starts quietly — tray only, no window.
+cargo run -p orbit-app --features custom-protocol
+
+# Then: Ctrl/Cmd+Shift+Space for the ring, or left-click the tray icon.
+
+# Or hand it files directly (the "Open with Orbit" / "Send to" route):
+cargo run -p orbit-app --features custom-protocol -- ~/Pictures/photo.png
+```
+
+The ring starts **hidden** on purpose: Orbit is a background utility, not a
+window you go looking for. It stays on top until you dismiss it with
+<kbd>Esc</kbd> or a click outside.
+
+> ⚠️ **`--features custom-protocol` is not optional for a real binary.** Without
+> it Tauri builds in *dev mode* and loads `devUrl` (`http://localhost:1420`), so
+> you get a window with nothing in it unless the Vite dev server happens to be
+> running. This is the single most common "my Tauri app is blank" trap.
+>
+> For UI work with hot reload, use `npm run tauri dev` instead — the CLI sets the
+> feature for you.
 
 ## 🧠 How it works
 
@@ -185,7 +226,7 @@ Orbit/
 
 | | Milestone | State |
 |---|---|---|
-| **M1** | Tray app, global hotkey, transparent overlay, radial menu UI | 🚧 in progress |
+| **M1** | Tray app, global hotkey, transparent overlay, radial menu UI | ✅ shipped |
 | **M2** | Job runner, worker pool, image & audio conversion | ⏳ planned |
 | **M3** | Video / PDF / document engines + editing tools | ⏳ planned |
 | **M4** | Per-OS Shift-drag trigger + shell integration | ⏳ planned |

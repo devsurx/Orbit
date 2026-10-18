@@ -1,0 +1,27 @@
+[package]
+name = "orbit-app"
+description = "Orbit's desktop shell: tray icon, global hotkey and the radial overlay."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+orbit-registry = { path = "../orbit-registry" }
+serde = { workspace = true }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+
+[features]
+# Switches Tauri from the dev server to the frontend embedded in the binary.
+# Without this a plain `cargo build` serves `devUrl` and the ring stays blank.
+# `tauri build` (and `npm run tauri build`) enables it for release artifacts.
+custom-protocol = ["tauri/custom-protocol"]
+
+[lints]
+workspace = true
