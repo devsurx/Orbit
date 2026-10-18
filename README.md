@@ -39,6 +39,21 @@ tiny window, no "Save As" dialog, no upload, no account.
 
 ---
 
+## 🚀 Quick start
+
+```bash
+orbit ~/Pictures/photo.png    # the ring opens under your cursor
+```
+
+Pick a petal — *Convert → WebP*, *Compress*, *Trim* — and the result lands
+**next to the original** as `photo (converted).webp`. Nothing is overwritten,
+nothing is uploaded, and `orbit --log` prints the path of every file Orbit has
+written.
+
+<sub>First time here? → [Build from source](#-build-from-source) · [The `orbit` command](#-the-orbit-command)</sub>
+
+---
+
 ## ✨ What it is
 
 Orbit is a **background utility** that lives in your tray and only appears when
