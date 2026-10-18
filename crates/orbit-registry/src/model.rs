@@ -412,6 +412,18 @@ pub struct Action {
     /// Caveat shown as a tooltip.
     #[serde(default)]
     pub note: Option<String>,
+    /// Word used in the output name, as in `photo (converted).webp`.
+    ///
+    /// Data rather than code, so the naming rule has one home and a translator
+    /// has one place to change it. A format petal uses the generic `convert`
+    /// action's tag.
+    #[serde(default = "default_tag")]
+    pub tag: String,
+    /// Extension the result carries: `same` keeps the input's own extension
+    /// (`compress` a PNG and it stays a PNG), anything else is used verbatim
+    /// (`mp3` for "Extract audio", `png` for "Extract frame").
+    #[serde(default = "default_output_ext")]
+    pub output_ext: String,
 }
 
 fn default_true() -> bool {
@@ -420,6 +432,14 @@ fn default_true() -> bool {
 
 fn default_requires_files() -> u32 {
     1
+}
+
+fn default_tag() -> String {
+    "converted".to_owned()
+}
+
+fn default_output_ext() -> String {
+    "same".to_owned()
 }
 
 impl Action {

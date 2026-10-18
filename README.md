@@ -12,7 +12,7 @@ tiny window, no "Save As" dialog, no upload, no account.
 [![License: MPL 2.0](https://img.shields.io/badge/license-MPL%202.0-6e4aff.svg)](https://www.mozilla.org/en-US/MPL/2.0/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2ea043.svg)](#-platform-support)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-dea584.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-M1%20shipped-2ea043.svg)](#-roadmap)
+[![Status](https://img.shields.io/badge/status-M2%20shipped-2ea043.svg)](#-roadmap)
 [![No telemetry](https://img.shields.io/badge/telemetry-none-2ea043.svg)](#-privacy)
 
 </div>
@@ -57,7 +57,8 @@ you already trust (`FFmpeg`, ImageMagick, Ghostscript, …). Nothing is uploaded
 |---|---|
 | 🖱️ **Shift-drag trigger** | No window to find. The ring appears where your cursor is. |
 | 🧠 **Context-aware** | A `.mov` offers video petals; a folder of `.png` offers image tools. |
-| 🔁 **150+ conversion pairs** | Generated from a data-driven registry — add a format, not code. |
+| 🔁 **845 conversion pairs** | Generated from a data-driven registry — add a format, not code. |
+| 💾 **Never clobbers your files** | Results land beside the source as `name (converted).ext`, published atomically. |
 | 🧰 **Editing, not just converting** | Resize, crop, trim, rotate, strip EXIF, watermark, merge, split. |
 | ⚙️ **Batch & presets** | Name a workflow once, reuse it forever. |
 | 🗂️ **Watch folders** | Drop a file in a folder, get a converted one out. |
@@ -162,8 +163,9 @@ build tools. Everything else comes from Cargo.
 git clone https://github.com/devsurx/Orbit.git
 cd Orbit
 
-# Registry + core crates (no system deps needed)
-cargo test -p orbit-registry
+# Core crates only — no system deps needed. The end-to-end tests skip
+# themselves when FFmpeg/ImageMagick are not installed.
+cargo test -p orbit-registry -p orbit-jobs
 
 # Inspect the generated ring for any file type
 cargo run -p orbit-registry --example menu -- mov png heic
@@ -231,6 +233,51 @@ engines installed        11
   ...
 ```
 
+## ⚙️ Running a job
+
+Picking a petal no longer just acknowledges the click — it converts the file.
+
+```text
+petal pick ─▶ resolve ─▶ plan ─▶ worker pool ─▶ publish ─▶ orbit://job
+              (which      (argv)   (N files      (atomic,     (the hub shows
+               engine)              in parallel)   no clobber)  progress)
+```
+
+- **Resolution is data-driven too.** The pick names a format or an action; the
+  resolver asks the registry which engine can do it on *this* machine, which
+  extension the result carries, and which word belongs in the name.
+- **Results land beside the source.** The word comes from the action's `tag` in
+  [`registry/actions.json`](registry/actions.json), so the naming rule has exactly
+  one home:
+
+  | You picked | You get |
+  |---|---|
+  | Convert → WebP | `photo (converted).webp` |
+  | Compress | `photo (compressed).jpg` |
+  | Audio from video | `clip (audio).mp3` |
+  | Trim | `clip (trimmed).mp4` |
+
+- **An existing file is never overwritten.** If the name is taken you get
+  `photo (converted 2).webp`, and the original bytes are untouched.
+- **Writes are atomic.** The result is built as a hidden `.orbit-*` scratch file
+  in the destination folder and published with a hard link, so a half-written
+  file never appears under a real name — and a crash cannot leave a torn one.
+  Scratch files are cleaned up on every path, including cancellation.
+- **Batches fan out.** One job per file, on half your cores (capped at four), so
+  a fifty-file drop does not turn the machine into a space heater.
+- **Progress streams to the ring.** The hub shows `2 of 5 done · 41%`, and stays
+  open when something fails, with the engine's own reason.
+
+Driven today: **FFmpeg** (audio, video), **ImageMagick** (raster) and **vips**
+(when installed). PDF, document and the built-in `orbit-native` operations arrive
+in M3 — until then they fail with a message that says so, rather than guessing a
+command line at your files.
+
+```bash
+# The whole pipeline, against the real tools installed on this machine
+cargo test -p orbit-jobs
+```
+
 ## 🗂️ Project layout
 
 ```text
@@ -249,9 +296,14 @@ Orbit/
 │   │   ├── src/
 │   │   ├── tests/
 │   │   └── examples/menu.rs  #    dev tool: "what does a .mov offer?"
-│   ├── orbit-app/            # 🪟 Tauri shell: tray, hotkey, overlay  (M1)
-│   └── orbit-cli/            # ⌨️  headless `orbit convert …`        (M5)
-└── src/                      # ⚛️  React + Vite + Tailwind radial UI  (M1)
+│   ├── orbit-jobs/           # ⚙️  resolve · plan · run · publish        (M2)
+│   │   ├── src/resolve.rs    #    petal pick  →  concrete JobRequests
+│   │   ├── src/plan.rs       #    JobRequest  →  argv (pure, async-free)
+│   │   ├── src/output.rs     #    naming, scratch files, atomic publish
+│   │   └── src/runner.rs     #    worker pool, cancellation, progress
+│   ├── orbit-app/            # 🪟 Tauri shell: tray, hotkey, overlay, pool (M1–M2)
+│   └── orbit-cli/            # ⌨️  headless `orbit convert …`            (M5)
+└── src/                      # ⚛️  React + Vite + Tailwind radial UI      (M1–M2)
 ```
 
 ## 🗺️ Roadmap
@@ -259,7 +311,7 @@ Orbit/
 | | Milestone | State |
 |---|---|---|
 | **M1** | Tray app, global hotkey, transparent overlay, radial menu UI | ✅ shipped |
-| **M2** | Job runner, worker pool, image & audio conversion | ⏳ planned |
+| **M2** | Job runner, worker pool, image & audio conversion | ✅ shipped |
 | **M3** | Video / PDF / document engines + editing tools | ⏳ planned |
 | **M4** | Per-OS Shift-drag trigger + shell integration | ⏳ planned |
 | **M5** | Presets, batch, history, watch folders, OCR, CLI | ⏳ planned |

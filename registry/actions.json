@@ -9,6 +9,7 @@
     "options": ["to", "*"],
     "defaults": {},
     "rank": 100,
+    "tag": "converted",
     "ring": false,
     "note": "The generic convert action. Format-specific petals are built from conversions.json; this one powers the command palette (\"png to webp\") and chains, where the target is chosen at run time. The \"*\" option entry means \"whatever the resolved conversion rule exposes\".",
     "resolves_via": "conversions"
@@ -38,7 +39,8 @@
     },
     "options": ["compress_mode", "quality", "target_size", "strip_metadata"],
     "defaults": { "compress_mode": "quality", "quality": 78, "target_size": 10485760 },
-    "rank": 90
+    "rank": 90,
+    "tag": "compressed"
   },
   {
     "id": "merge",
@@ -67,6 +69,8 @@
     "defaults": { "merge_output": "pdf", "merge_order": "as_dragged" },
     "requires_files": 2,
     "rank": 85,
+    "tag": "merged",
+    "output_ext": "pdf",
     "note": "Needs at least two files: PDFs become one PDF, images one PDF or GIF, video and audio are concatenated in drag order."
   },
   {
@@ -80,6 +84,7 @@
     "options": ["start", "end"],
     "defaults": { "start": 0, "end": null },
     "rank": 80,
+    "tag": "trimmed",
     "note": "Opens a waveform or filmstrip so the section is picked visually, with times editable to the frame."
   },
   {
@@ -92,7 +97,9 @@
     "requires": { "video": ["op:extract_audio"] },
     "options": ["audio_bitrate", "sample_rate", "channels", "normalize"],
     "defaults": { "audio_bitrate": "192000", "normalize": false },
-    "rank": 70
+    "rank": 70,
+    "tag": "audio",
+    "output_ext": "mp3"
   },
   {
     "id": "extract_pages",
@@ -105,6 +112,8 @@
     "options": ["pages"],
     "defaults": { "pages": "1-" },
     "rank": 60,
+    "tag": "pages",
+    "output_ext": "pdf",
     "note": "One file per page or per range, written next to the original."
   },
   {
@@ -117,7 +126,9 @@
     "requires": { "video": ["op:extract_frames"] },
     "options": ["time", "count", "scale"],
     "defaults": { "time": 1, "count": 1 },
-    "rank": 55
+    "rank": 55,
+    "tag": "frame",
+    "output_ext": "png"
   },
   {
     "id": "resize",
@@ -129,7 +140,8 @@
     "requires": { "image": ["op:resize"], "video": ["op:resize"] },
     "options": ["resize_mode", "percent", "max_dim", "resize_preset"],
     "defaults": { "resize_mode": "max_dim", "max_dim": 1920 },
-    "rank": 60
+    "rank": 60,
+    "tag": "resized"
   },
   {
     "id": "crop",
@@ -142,6 +154,7 @@
     "options": ["region", "aspect"],
     "defaults": { "region": null, "aspect": "free" },
     "rank": 50,
+    "tag": "cropped",
     "note": "Opens a preview with a draggable box and aspect-ratio presets."
   },
   {
@@ -170,6 +183,7 @@
     "options": [],
     "defaults": {},
     "rank": 40,
+    "tag": "clean",
     "note": "Drops EXIF, GPS, camera, author and software tags. Writes a new file, never edits in place."
   },
   {
@@ -183,6 +197,8 @@
     "options": ["ocr_lang", "ocr_output", "pages"],
     "defaults": { "ocr_lang": "auto", "ocr_output": "txt" },
     "rank": 30,
+    "tag": "text",
+    "output_ext": "txt",
     "note": "Fully offline. Language data is fetched once, only if OCR is used."
   },
   {
@@ -199,7 +215,8 @@
     "requires": { "image": ["op:rotate"], "video": ["op:rotate"], "pdf": ["op:pdf_rotate"] },
     "options": ["rotate"],
     "defaults": { "rotate": "90" },
-    "rank": 20
+    "rank": 20,
+    "tag": "rotated"
   },
   {
     "id": "flip",
@@ -211,7 +228,8 @@
     "requires": { "image": ["op:flip"], "video": ["op:flip"] },
     "options": ["flip_axis"],
     "defaults": { "flip_axis": "horizontal" },
-    "rank": 15
+    "rank": 15,
+    "tag": "flipped"
   },
   {
     "id": "grayscale",
@@ -223,6 +241,7 @@
     "requires": { "image": ["op:grayscale"], "video": ["op:grayscale"] },
     "options": [],
     "defaults": {},
-    "rank": 10
+    "rank": 10,
+    "tag": "grayscale"
   }
 ]

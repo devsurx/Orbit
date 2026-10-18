@@ -74,3 +74,18 @@ export interface DispatchAck {
   message: string;
   detail?: string;
 }
+
+/**
+ * One state change of a queued job, mirroring `orbit_jobs::JobEvent`.
+ *
+ * The Rust side flattens the state enum under a `state` tag, so the terminal
+ * and progress fields sit beside the id rather than nested.
+ */
+export type JobState =
+  | { state: "queued" }
+  | { state: "running"; percent?: number }
+  | { state: "done"; path: string }
+  | { state: "failed"; message: string }
+  | { state: "cancelled" };
+
+export type JobEvent = { id: number; label: string } & JobState;

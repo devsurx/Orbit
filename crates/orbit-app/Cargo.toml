@@ -12,6 +12,7 @@ publish = false
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+orbit-jobs = { path = "../orbit-jobs" }
 orbit-registry = { path = "../orbit-registry" }
 serde = { workspace = true }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
