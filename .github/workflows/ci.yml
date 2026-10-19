@@ -29,17 +29,9 @@ jobs:
 
       # Ubuntu LTS still ships ImageMagick 6, whose front end is `convert`, not
       # `magick`, and whose flags are not the ones Orbit builds. Orbit therefore
-      # reports it as unavailable — correctly. Fetching the official ImageMagick 7
-      # static build keeps those tests real instead of skipped; if the download
-      # fails, the tests skip loudly rather than lying.
-      - name: ImageMagick 7 (best effort)
-        run: |
-          sudo mkdir -p /opt/imagemagick
-          sudo curl -fsSL --retry 3 -o /opt/imagemagick/magick \
-            https://imagemagick.org/archive/binaries/magick || exit 0
-          sudo chmod +x /opt/imagemagick/magick
-          echo "/opt/imagemagick" >> "$GITHUB_PATH"
-
+      # reports it as unavailable — which is correct, and why the engine report
+      # below prints `NO magick` on this runner. The ImageMagick end-to-end tests
+      # skip themselves here; they run where ImageMagick 7 is installed.
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -52,6 +44,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - run: npm ci
+
+      # The Tauri CLI refuses to build when the JS package and the Rust crate are
+      # on different minor releases. Catching it here is seconds; catching it in
+      # the installer matrix is a failed release.
+      - name: Tauri package versions agree
+        run: |
+          crate="$(grep -A1 '^name = "tauri"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')"
+          api="$(node -p "require('@tauri-apps/api/package.json').version")"
+          cli="$(node -p "require('@tauri-apps/cli/package.json').version")"
+          echo "tauri crate $crate · @tauri-apps/api $api · @tauri-apps/cli $cli"
+          test "${crate%.*}" = "${api%.*}" || {
+            echo "::error::the tauri crate and @tauri-apps/api must share a minor release"
+            exit 1
+          }
+          test "${crate%.*}" = "${cli%.*}" || {
+            echo "::error::the tauri crate and @tauri-apps/cli must share a minor release"
+            exit 1
+          }
       - run: npm run typecheck
       - run: npm run build
 
@@ -91,6 +101,17 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - uses: Swatinem/rust-cache@v2
+
+      # Compiling a Windows resource needs a resource compiler. tauri-winres uses
+      # `llvm-rc`, which Ubuntu ships in a versioned directory rather than on PATH.
+      - name: Resource compiler for the Windows target
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends llvm
+          rc="$(find /usr/lib -name llvm-rc -type f | head -1)"
+          test -n "$rc" || { echo "::error::llvm-rc not found"; exit 1; }
+          echo "using $rc"
+          echo "$(dirname "$rc")" >> "$GITHUB_PATH"
 
       - uses: actions/setup-node@v4
         with:

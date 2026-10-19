@@ -115,6 +115,13 @@ by design, so we say so instead of shipping something flaky.
 > to Orbit from the shell — `orbit-app photo.png` selects them and opens the ring.
 > That last route is the same one "Open with Orbit" and "Send to" use.
 
+> 🐧 **Linux and ImageMagick.** The image pipeline is built on ImageMagick **7**
+> (`magick`). Debian 13, Fedora and Arch ship it; Ubuntu LTS still ships
+> ImageMagick 6, whose binary is `convert` and whose flags differ, so Orbit
+> reports that engine as unavailable instead of guessing a command line. Install
+> ImageMagick 7, or install `libvips-tools` — vips is the preferred image engine
+> anyway — and the built-in engine covers the basic raster work either way.
+
 > ⚠️ **Wayland has no global hotkey path at all.** Orbit's hotkey goes through
 > `XGrabKey`, which Wayland deliberately makes inert: the compositor owns input,
 > and XWayland only sees events for the focused X11 window. The grab even
