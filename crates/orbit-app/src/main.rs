@@ -17,6 +17,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod settings;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -25,20 +27,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_jobs::{Job, JobEvent, JobState, Pick, PickKind, Runner, resolve_pick};
 use orbit_registry::{
-    EngineStatus, MenuModel, MenuRequest, Petal, PetalKind, Registry, SourceFile,
+    EngineStatus, MenuModel, MenuRequest, OptionSpec, Petal, PetalKind, Registry, SourceFile,
 };
 use serde::Serialize;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, Runtime, State, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+use crate::settings::{HotkeyStatus, Settings};
+
 /// Ring window label; must match `tauri.conf.json`.
 const RING: &str = "ring";
-/// Default trigger. Every platform can have this, even where Shift-drag cannot.
-const HOTKEY: &str = "CmdOrCtrl+Shift+Space";
 /// Ring diameter; must match the window size in `tauri.conf.json`.
 const RING_SIZE: f64 = 640.0;
 /// Event carrying the current ring contents to the webview.
@@ -47,6 +49,8 @@ const MENU_EVENT: &str = "orbit://menu";
 const DRAG_EVENT: &str = "orbit://drag";
 /// Event carrying job progress, completion and failure.
 const JOB_EVENT: &str = "orbit://job";
+/// Event carrying a changed global shortcut, so the ring can update its hint.
+const HOTKEY_EVENT: &str = "orbit://hotkey";
 
 /// Everything the commands need, built once at startup.
 struct Orbit {
@@ -61,18 +65,31 @@ struct Orbit {
     /// The ring as last rendered. A pick is checked against it, so a stale
     /// window cannot ask for a petal that was never offered.
     model: Mutex<Option<MenuModel>>,
+    /// Settings as loaded, and where they came from.
+    settings: Mutex<Settings>,
+    settings_path: PathBuf,
+    /// What the global shortcut is doing right now.
+    hotkey: Mutex<HotkeyStatus>,
 }
 
 impl Orbit {
-    /// Load the registry and probe which engines exist on this machine.
-    fn new() -> Result<Self, String> {
+    /// Load the registry, the settings, and probe which engines exist here.
+    fn new<R: Runtime>(app: &AppHandle<R>) -> Result<Self, String> {
         let registry = Registry::bundled().map_err(|error| error.to_string())?;
         let statuses = detect_engines(&registry);
+        let settings_path = app.path().app_config_dir().map_or_else(
+            |_| PathBuf::from("orbit-settings.json"),
+            |dir| settings::settings_path(&dir),
+        );
+        let settings = Settings::load(&settings_path);
         Ok(Self {
             registry,
             statuses: Mutex::new(statuses),
             last_drop: Mutex::new(Vec::new()),
             model: Mutex::new(None),
+            settings: Mutex::new(settings),
+            settings_path,
+            hotkey: Mutex::new(HotkeyStatus::off()),
         })
     }
 
@@ -141,6 +158,13 @@ impl Orbit {
     /// The ring for the last dropped selection, which is what the hotkey shows.
     fn current_menu(&self) -> MenuModel {
         self.menu(self.classify(self.selection()))
+    }
+
+    /// The global shortcut as it stands, for the ring and the tray.
+    fn hotkey(&self) -> HotkeyStatus {
+        self.hotkey
+            .lock()
+            .map_or_else(|_| HotkeyStatus::off(), |status| status.clone())
     }
 
     /// The petal the ring last offered for this pick, if it still offers it.
@@ -271,10 +295,39 @@ fn menu_for(state: State<'_, Orbit>, paths: Vec<String>) -> MenuModel {
     }
 }
 
+/// The whole option catalog, keyed by option key.
+///
+/// The ring fetches this once and renders the options panel from it, so the
+/// panel's fields, ranges, labels and `show_if` rules are the registry's, not a
+/// second copy living in the webview. Petals only name the *keys* they accept;
+/// the widget for each key is described here.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn option_specs(state: State<'_, Orbit>) -> BTreeMap<String, OptionSpec> {
+    state
+        .registry
+        .options()
+        .iter()
+        .map(|(key, spec)| (key.clone(), spec.clone()))
+        .collect()
+}
+
+/// The global shortcut as it stands.
+///
+/// The ring shows it, so the hint under the hub names the combination that is
+/// actually registered rather than the one Orbit shipped with.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn hotkey_status(state: State<'_, Orbit>) -> HotkeyStatus {
+    state.hotkey()
+}
+
 /// Run a petal pick: resolve it into jobs and hand them to the pool.
 ///
 /// The pick is checked against the ring as last rendered, so a stale window can
-/// neither invent a petal nor run one against a different selection. Arguments
+/// neither invent a petal nor run one against a different selection. `options`
+/// are the panel's values, merged over the petal's defaults; keys the petal does
+/// not offer are ignored rather than smuggled into a command line. Arguments
 /// arrive by value; see `menu_for`.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -284,6 +337,7 @@ fn dispatch(
     petal_kind: String,
     reference: String,
     files: Vec<String>,
+    options: Option<BTreeMap<String, serde_json::Value>>,
 ) -> DispatchAck {
     let Some(kind) = PickKind::from_wire(&petal_kind) else {
         return DispatchAck::refused(format!("Unrecognised pick \"{petal_kind}\""));
@@ -312,10 +366,21 @@ fn dispatch(
         _ => petal.label.clone(),
     };
 
+    // The petal's defaults are what a plain drop uses; the panel's values sit
+    // on top of them, filtered to the keys the petal actually declares.
+    let mut values = petal.defaults.clone();
+    if let Some(chosen) = options {
+        for (key, value) in chosen {
+            if petal.options.iter().any(|offered| offered == &key) {
+                values.insert(key, value);
+            }
+        }
+    }
+
     let pick = Pick {
         kind,
         reference: reference.clone(),
-        defaults: petal.defaults.clone(),
+        defaults: values,
     };
     let resolution = match resolve_pick(&state.registry, &state.statuses(), &pick, &sources) {
         Ok(resolution) => resolution,
@@ -421,67 +486,192 @@ where
         .collect()
 }
 
+/// A shortcut named on the command line.
+enum HotkeyArg {
+    /// No `--hotkey` flag at all: keep what the settings say.
+    Absent,
+    /// `--hotkey=off`.
+    Off,
+    /// `--hotkey=<accelerator>`.
+    Custom(String),
+}
+
+/// Read `--hotkey=<accelerator>`, or `--hotkey=off` to turn it off.
+///
+/// Reaching this is a deliberate act, so the value is kept as well as applied —
+/// it is how a script or an installer configures the trigger.
+fn hotkey_from_args<I, S>(args: I) -> HotkeyArg
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    for arg in args {
+        let text = arg.as_ref().to_string_lossy().into_owned();
+        let Some(value) = text.strip_prefix("--hotkey=") else {
+            continue;
+        };
+        return if value.eq_ignore_ascii_case("off") {
+            HotkeyArg::Off
+        } else {
+            HotkeyArg::Custom(value.to_owned())
+        };
+    }
+    HotkeyArg::Absent
+}
+
 /// Whether this session is Wayland, where a client cannot own a global hotkey.
 fn on_wayland() -> bool {
     cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
-/// Register the in-process hotkey, if this platform can actually deliver one.
+/// What the tray and the ring say when the compositor owns global input.
+const WAYLAND_NOTE: &str =
+    "Wayland does not let an app own a global shortcut; bind Orbit in your compositor instead";
+
+/// Register `accelerator`, replacing whatever was registered before.
 ///
-/// `global-hotkey` is X11-only on Linux: under Wayland the grab is accepted at
-/// the X protocol level and then never fires, because the compositor owns input.
-/// That silent success is worse than a failure, so say so out loud and point at
-/// the compositor binding instead of leaving the user pressing keys at nothing.
-fn register_hotkey<R: Runtime>(app: &AppHandle<R>) {
-    match app.global_shortcut().register(HOTKEY) {
-        Ok(()) if on_wayland() => {
-            eprintln!(
-                "orbit: hotkey {HOTKEY} cannot work on Wayland (the compositor owns \
-                 global input).\n\
-                 orbit: bind Orbit in your compositor instead — see \"Global hotkeys \
-                 on Wayland\" in the README."
-            );
-        }
-        Ok(()) => {}
-        Err(error) => {
-            eprintln!("orbit: could not register {HOTKEY} ({error}); use the tray icon.");
-        }
+/// Always clears first: registering a second combination without unregistering
+/// the first would leave both live, and the tray would then be showing a
+/// shortcut the user thought they had replaced.
+fn apply_hotkey<R: Runtime>(app: &AppHandle<R>, accelerator: Option<&str>) -> HotkeyStatus {
+    let shortcuts = app.global_shortcut();
+    let _ = shortcuts.unregister_all();
+
+    let Some(accelerator) = accelerator else {
+        eprintln!("orbit: global shortcut is off — use the tray icon or \"Open with Orbit\"");
+        return HotkeyStatus::off();
+    };
+
+    let label = settings::label_for(accelerator);
+    let status = match shortcuts.register(accelerator) {
+        Ok(()) => HotkeyStatus {
+            accelerator: Some(accelerator.to_owned()),
+            label,
+            registered: true,
+            note: None,
+        },
+        Err(error) => HotkeyStatus {
+            accelerator: Some(accelerator.to_owned()),
+            label,
+            registered: false,
+            note: Some(format!("{accelerator} could not be registered ({error})")),
+        },
+    };
+
+    if status.registered && on_wayland() {
+        // The grab is accepted at the X protocol level and then never fires,
+        // because the compositor owns input. Reporting success would be a lie,
+        // so the note says what to do instead.
+        eprintln!("orbit: {accelerator} cannot be delivered — {WAYLAND_NOTE}");
+        return HotkeyStatus {
+            registered: false,
+            note: Some(WAYLAND_NOTE.to_owned()),
+            ..status
+        };
     }
+
+    match &status.note {
+        Some(note) => eprintln!("orbit: {note}"),
+        None => eprintln!("orbit: {} opens the ring", status.label),
+    }
+    status
 }
 
-/// Centre the window on the pointer, which is what makes this feel radial.
-#[allow(clippy::cast_possible_truncation)] // screen coordinates are tiny next to i32
-fn position_at_cursor<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
-    let cursor = window.cursor_position()?;
-    let x = (cursor.x - RING_SIZE / 2.0).round() as i32;
-    let y = (cursor.y - RING_SIZE / 2.0).round() as i32;
-    window.set_position(PhysicalPosition::new(x, y))
+/// Change the shortcut: persist it, apply it, and tell whatever shows it.
+fn set_hotkey<R: Runtime>(app: &AppHandle<R>, choice: Option<&str>) {
+    let Some(orbit) = app.try_state::<Orbit>() else {
+        return;
+    };
+    if let Ok(mut settings) = orbit.settings.lock() {
+        settings.hotkey = choice.map(str::to_owned);
+        if let Err(error) = settings.save(&orbit.settings_path) {
+            eprintln!("orbit: could not save the shortcut ({error})");
+        }
+    }
+
+    let status = apply_hotkey(app, choice);
+    if let Ok(mut current) = orbit.hotkey.lock() {
+        *current = status.clone();
+    }
+    if let Ok(menu) = tray_menu(app, &status) {
+        if let Some(tray) = app.tray_by_id("orbit") {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+    let _ = app.emit_to(RING, HOTKEY_EVENT, status);
+}
+
+/// The tray menu, rebuilt whenever the shortcut changes.
+///
+/// The running combination gets a tick, because a tray menu has no radio
+/// buttons and the current choice otherwise has nowhere to be seen.
+fn tray_menu<R: Runtime>(app: &AppHandle<R>, hotkey: &HotkeyStatus) -> tauri::Result<Menu<R>> {
+    let open = MenuItem::with_id(app, "open", "Open ring", true, None::<&str>)?;
+    let reload = MenuItem::with_id(app, "reload", "Reload engines", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Orbit", true, None::<&str>)?;
+
+    let shortcut = Submenu::with_id(app, "shortcut", "Shortcut", true)?;
+    for (accelerator, label) in settings::PRESETS {
+        let chosen = hotkey.accelerator.as_deref() == Some(*accelerator);
+        let text = format!("{} {label}", if chosen { "✓" } else { " " });
+        shortcut.append(&MenuItem::with_id(
+            app,
+            format!("hotkey:{accelerator}"),
+            text,
+            true,
+            None::<&str>,
+        )?)?;
+    }
+    shortcut.append(&MenuItem::with_id(
+        app,
+        "hotkey:off",
+        format!(
+            "{} Off",
+            if hotkey.accelerator.is_none() {
+                "✓"
+            } else {
+                " "
+            }
+        ),
+        true,
+        None::<&str>,
+    )?)?;
+
+    Menu::with_items(app, &[&open, &shortcut, &reload, &quit])
 }
 
 /// Build the tray icon. Left click opens the ring; the menu has the rest.
 fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open ring", true, Some(HOTKEY))?;
-    let reload = MenuItem::with_id(app, "reload", "Reload engines", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Orbit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &reload, &quit])?;
+    let status = app
+        .try_state::<Orbit>()
+        .map_or_else(HotkeyStatus::off, |orbit| orbit.hotkey());
+    let menu = tray_menu(app, &status)?;
 
     let mut builder = TrayIconBuilder::with_id("orbit")
         .tooltip("Orbit — radial converter")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "open" => show_ring(app),
-            "reload" => {
-                if let Some(orbit) = app.try_state::<Orbit>() {
-                    orbit.refresh_engines();
-                    let model = orbit.current_menu();
-                    if let Some(window) = app.get_webview_window(RING) {
-                        let _ = window.emit(MENU_EVENT, model);
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref().to_owned();
+            if let Some(accelerator) = id.strip_prefix("hotkey:") {
+                let choice = (accelerator != "off").then_some(accelerator);
+                set_hotkey(app, choice);
+                return;
+            }
+            match id.as_str() {
+                "open" => show_ring(app),
+                "reload" => {
+                    if let Some(orbit) = app.try_state::<Orbit>() {
+                        orbit.refresh_engines();
+                        let model = orbit.current_menu();
+                        if let Some(window) = app.get_webview_window(RING) {
+                            let _ = window.emit(MENU_EVENT, model);
+                        }
                     }
                 }
+                "quit" => app.exit(0),
+                _ => {}
             }
-            "quit" => app.exit(0),
-            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
@@ -500,6 +690,15 @@ fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     builder.build(app)?;
     Ok(())
+}
+
+/// Centre the window on the pointer, which is what makes this feel radial.
+#[allow(clippy::cast_possible_truncation)] // screen coordinates are tiny next to i32
+fn position_at_cursor<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
+    let cursor = window.cursor_position()?;
+    let x = (cursor.x - RING_SIZE / 2.0).round() as i32;
+    let y = (cursor.y - RING_SIZE / 2.0).round() as i32;
+    window.set_position(PhysicalPosition::new(x, y))
 }
 
 fn main() {
@@ -536,7 +735,7 @@ fn main() {
                 .build(),
         )
         .setup(|app| {
-            let orbit = Orbit::new()?;
+            let orbit = Orbit::new(app.handle())?;
 
             // Files handed to us on the command line are the "Open with Orbit"
             // / "Send to" route: treat them as the current selection.
@@ -546,6 +745,18 @@ fn main() {
                 if let Ok(mut last) = orbit.last_drop.lock() {
                     *last = from_cli;
                 }
+            }
+
+            // The shortcut is registered from the settings as loaded, before the
+            // tray is built, because the tray menu shows which one is running.
+            let accelerator = orbit
+                .settings
+                .lock()
+                .ok()
+                .and_then(|settings| settings.hotkey.clone());
+            let status = apply_hotkey(app.handle(), accelerator.as_deref());
+            if let Ok(mut current) = orbit.hotkey.lock() {
+                *current = status;
             }
 
             app.manage(orbit);
@@ -562,7 +773,16 @@ fn main() {
             });
 
             setup_tray(app.handle())?;
-            register_hotkey(app.handle());
+
+            // A shortcut named on the command line is a one-off override that is
+            // remembered, so a script (or an installer) can set the trigger up.
+            match hotkey_from_args(std::env::args_os().skip(1)) {
+                HotkeyArg::Absent => {}
+                HotkeyArg::Off => set_hotkey(app.handle(), None),
+                HotkeyArg::Custom(accelerator) => {
+                    set_hotkey(app.handle(), Some(&accelerator));
+                }
+            }
 
             // macOS: no dock icon, no space in the app switcher.
             #[cfg(target_os = "macos")]
@@ -574,7 +794,12 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![menu_for, dispatch])
+        .invoke_handler(tauri::generate_handler![
+            menu_for,
+            dispatch,
+            option_specs,
+            hotkey_status
+        ])
         .on_window_event(|window, event| match event {
             WindowEvent::CloseRequested { api, .. } => {
                 // A tray app hides; quitting is explicit, from the tray menu.

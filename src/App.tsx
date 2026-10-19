@@ -2,8 +2,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import RadialMenu, { RING_SIZE } from "./components/RadialMenu";
-import { dispatchPetal, hideRing, menuFor, onJob, onMenu, currentWindow } from "./lib/ipc";
-import type { DispatchAck, JobEvent, MenuModel, Petal } from "./lib/types";
+import OptionsPanel, { isVisible, type OptionValues } from "./components/OptionsPanel";
+import {
+  currentWindow,
+  dispatchPetal,
+  hideRing,
+  hotkeyStatus,
+  menuFor,
+  onHotkey,
+  onJob,
+  onMenu,
+  optionSpecs,
+} from "./lib/ipc";
+import type {
+  DispatchAck,
+  HotkeyStatus,
+  JobEvent,
+  MenuModel,
+  OptionSpec,
+  Petal,
+} from "./lib/types";
 
 interface DragState {
   active: boolean;
@@ -18,6 +36,12 @@ const JOB_HISTORY = 200;
 /** How long to leave a finished batch on screen before getting out of the way. */
 const LINGER_MS = 1200;
 
+/** A petal whose options are open, and the values currently shown. */
+interface PanelState {
+  petal: Petal;
+  values: OptionValues;
+}
+
 export default function App() {
   const [model, setModel] = useState<MenuModel | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -26,6 +50,9 @@ export default function App() {
   const [ack, setAck] = useState<DispatchAck | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Map<number, JobEvent>>(() => new Map());
+  const [specs, setSpecs] = useState<Record<string, OptionSpec>>({});
+  const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null);
+  const [panel, setPanel] = useState<PanelState | null>(null);
 
   const files = useMemo(
     () => (model?.files ?? []).map((file) => file.path).filter((path): path is string => Boolean(path)),
@@ -39,13 +66,20 @@ export default function App() {
     let unlistenMenu: UnlistenFn | undefined;
     let unlistenDrag: UnlistenFn | undefined;
     let unlistenJob: UnlistenFn | undefined;
+    let unlistenHotkey: UnlistenFn | undefined;
     let cancelled = false;
 
     const boot = async () => {
       try {
-        const initial = await menuFor([]);
+        const [initial, catalog, status] = await Promise.all([
+          menuFor([]),
+          optionSpecs(),
+          hotkeyStatus(),
+        ]);
         if (!cancelled) {
           setModel(initial);
+          setSpecs(catalog);
+          setHotkey(status);
         }
       } catch (cause) {
         if (!cancelled) {
@@ -58,6 +92,7 @@ export default function App() {
         setActiveCategory(null);
         setHoveredPetal(null);
         setAck(null);
+        setPanel(null);
         // A new ring describes a new selection, so last time's jobs are done.
         setJobs(new Map());
       });
@@ -81,6 +116,8 @@ export default function App() {
           return next;
         });
       });
+
+      unlistenHotkey = await onHotkey(setHotkey);
     };
 
     void boot();
@@ -89,40 +126,35 @@ export default function App() {
       unlistenMenu?.();
       unlistenDrag?.();
       unlistenJob?.();
+      unlistenHotkey?.();
     };
-  }, []);
-
-  // Esc always gets you out, whatever has focus. Jobs keep running.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        void hideRing();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   // Once nothing is in flight, step aside — unless something failed, in which
   // case the ring stays up until it is read or dismissed.
   useEffect(() => {
-    if (progress.total === 0 || progress.inFlight > 0 || progress.failed > 0) {
+    if (
+      panel ||
+      progress.total === 0 ||
+      progress.inFlight > 0 ||
+      progress.failed > 0
+    ) {
       return;
     }
     const timer = window.setTimeout(() => void hideRing(), LINGER_MS);
     return () => window.clearTimeout(timer);
-  }, [progress.total, progress.inFlight, progress.failed]);
+  }, [panel, progress.total, progress.inFlight, progress.failed]);
 
+  /** Run a petal with an optional set of panel values. */
   const pick = useCallback(
-    async (petal: Petal) => {
+    async (petal: Petal, values?: OptionValues) => {
       if (petal.disabled) {
         setAck({ ok: false, message: petal.disabled.reason, detail: petal.disabled.hint });
         return;
       }
       setJobs(new Map());
       try {
-        setAck(await dispatchPetal(petal, files));
+        setAck(await dispatchPetal(petal, files, values));
       } catch (cause) {
         setAck({ ok: false, message: String(cause) });
       }
@@ -130,7 +162,83 @@ export default function App() {
     [files],
   );
 
+  /**
+   * Open the options panel for a petal.
+   *
+   * The starting values are the petal's own defaults where it has them, and the
+   * registry's default otherwise, so the panel always opens showing what a plain
+   * drop would have done.
+   */
+  const openPanel = useCallback(
+    (petal: Petal) => {
+      if (petal.disabled) {
+        setAck({ ok: false, message: petal.disabled.reason, detail: petal.disabled.hint });
+        return;
+      }
+      const values: OptionValues = {};
+      for (const key of petal.options ?? []) {
+        const spec = specs[key];
+        const fallback = spec?.default;
+        values[key] = petal.defaults?.[key] ?? fallback ?? "";
+      }
+      setPanel({ petal, values });
+      setActiveCategory(null);
+      setHoveredPetal(null);
+    },
+    [specs],
+  );
+
+  /** Run the petal the panel is showing, with the values on screen. */
+  const runPanel = useCallback(async () => {
+    if (!panel) {
+      return;
+    }
+    const { petal, values } = panel;
+    setPanel(null);
+    await pick(petal, values);
+  }, [panel, pick]);
+
+  // Esc gets you out: the panel closes first, then the ring. Jobs keep running.
+  // Enter runs whatever the panel is showing. Registered on every render so the
+  // handlers never close over a stale panel.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (panel) {
+          setPanel(null);
+        } else {
+          void hideRing();
+        }
+        return;
+      }
+      if (event.key === "Enter" && panel) {
+        event.preventDefault();
+        void runPanel();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   const idle = (model?.files.length ?? 0) === 0;
+
+  // The panel's fields, in catalog order, minus anything its own rules hide.
+  const visibleSpecs = useMemo(() => {
+    if (!panel) {
+      return [];
+    }
+    return (panel.petal.options ?? [])
+      .map((key) => specs[key])
+      .filter((spec): spec is OptionSpec => Boolean(spec))
+      .filter((spec) => isVisible(spec, panel.values));
+  }, [panel, specs]);
+
+  const changeOption = useCallback((key: string, value: unknown) => {
+    setPanel((current) =>
+      current ? { ...current, values: { ...current.values, [key]: value } } : current,
+    );
+  }, []);
 
   return (
     <div
@@ -154,7 +262,7 @@ export default function App() {
           ].join(" ")}
         />
 
-        {model && !idle && progress.inFlight === 0 && (
+        {model && !idle && progress.inFlight === 0 && !panel && (
           <RadialMenu
             model={model}
             activeCategory={activeCategory}
@@ -162,19 +270,35 @@ export default function App() {
             onHoverCategory={setActiveCategory}
             onHoverPetal={setHoveredPetal}
             onPick={pick}
+            onOptions={openPanel}
           />
         )}
 
-        <Hub
-          model={model}
-          idle={drag.active || idle}
-          dragging={drag.active}
-          dropped={drag.paths.length}
-          hoveredPetal={hoveredPetal}
-          ack={ack}
-          progress={progress}
-          error={error}
-        />
+        {panel ? (
+          <OptionsPanel
+            title={panel.petal.label}
+            subtitle={
+              panel.petal.engine ? `via ${panel.petal.engine}` : hintFor(panel.petal)
+            }
+            specs={visibleSpecs}
+            values={panel.values}
+            onChange={changeOption}
+            onRun={() => void runPanel()}
+            onClose={() => setPanel(null)}
+          />
+        ) : (
+          <Hub
+            model={model}
+            idle={drag.active || idle}
+            dragging={drag.active}
+            dropped={drag.paths.length}
+            hoveredPetal={hoveredPetal}
+            ack={ack}
+            progress={progress}
+            error={error}
+            hotkey={hotkey}
+          />
+        )}
       </div>
     </div>
   );
@@ -312,9 +436,20 @@ interface HubProps {
   ack: DispatchAck | null;
   progress: Progress;
   error: string | null;
+  hotkey: HotkeyStatus | null;
 }
 
-function Hub({ model, idle, dragging, dropped, hoveredPetal, ack, progress, error }: HubProps) {
+function Hub({
+  model,
+  idle,
+  dragging,
+  dropped,
+  hoveredPetal,
+  ack,
+  progress,
+  error,
+  hotkey,
+}: HubProps) {
   const busy = progress.inFlight > 0;
 
   const title = ack
@@ -332,7 +467,7 @@ function Hub({ model, idle, dragging, dropped, hoveredPetal, ack, progress, erro
     : hoveredPetal
       ? hoveredPetal.disabled?.reason ?? hintFor(hoveredPetal)
       : idle
-        ? "or press Ctrl+Shift+Space"
+        ? hotkeyHint(hotkey)
         : "Esc to cancel";
 
   return (
@@ -362,15 +497,35 @@ function summaryTitle(model: MenuModel | null): string {
     : `${count} files`;
 }
 
-function hintFor(petal: Petal): string {
-  switch (petal.kind) {
-    case "conversion":
-      return petal.engine ? `via ${petal.engine}` : "convert";
-    case "preset":
-      return "preset";
-    case "operator":
-      return "more options";
-    default:
-      return petal.engine ? `via ${petal.engine}` : "action";
+/** What to say under the idle hub about the way in. */
+function hotkeyHint(hotkey: HotkeyStatus | null): string {
+  if (!hotkey) {
+    return "or use the tray icon";
   }
+  if (hotkey.registered) {
+    return `or press ${hotkey.label}`;
+  }
+  if (hotkey.accelerator) {
+    // Registered with the platform but not deliverable, which on Linux means
+    // Wayland; the README says why in full.
+    return "shortcut unavailable here — open from the tray";
+  }
+  return "open from the tray icon";
+}
+
+function hintFor(petal: Petal): string {
+  const how = (() => {
+    switch (petal.kind) {
+      case "conversion":
+        return petal.engine ? `via ${petal.engine}` : "convert";
+      case "preset":
+        return "preset";
+      case "operator":
+        return "more options";
+      default:
+        return petal.engine ? `via ${petal.engine}` : "action";
+    }
+  })();
+  // The options panel is easy to miss, so the hint says how to reach it.
+  return (petal.options?.length ?? 0) > 0 ? `${how} · Alt for options` : how;
 }

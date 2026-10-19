@@ -4,15 +4,18 @@
 
 ### Summon a file converter with a flick of your wrist.
 
-Shift-drag any file, choose a radial petal, walk away. No drag-and-drop onto a
-tiny window, no "Save As" dialog, no upload, no account.
+Summon the ring, drop files on it, choose a radial petal, walk away. No
+drag-and-drop onto a tiny window, no "Save As" dialog, no upload, no account.
+
+<sub>🚧 The Shift-drag-anywhere trigger is M4; the ring, the engines and the drop
+target are already here.</sub>
 
 <br />
 
 [![License: MPL 2.0](https://img.shields.io/badge/license-MPL%202.0-6e4aff.svg)](https://www.mozilla.org/en-US/MPL/2.0/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2ea043.svg)](#-platform-support)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-dea584.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-M2%20shipped-2ea043.svg)](#-roadmap)
+[![Status](https://img.shields.io/badge/status-M3%20shipped-2ea043.svg)](#-roadmap)
 [![No telemetry](https://img.shields.io/badge/telemetry-none-2ea043.svg)](#-privacy)
 
 </div>
@@ -57,12 +60,17 @@ written.
 ## ✨ What it is
 
 Orbit is a **background utility** that lives in your tray and only appears when
-you want it. Drag files while holding <kbd>Shift</kbd> and a translucent ring
-opens under your cursor with *exactly* the actions that fit those files —
-convert, compress, resize, trim, OCR, strip metadata, merge a PDF, and more.
+you want it. When the ring is up it is a real drop target with *exactly* the
+actions that fit the files — convert, compress, resize, trim, OCR, strip
+metadata, merge a PDF, and more.
 
 It is **local-first**: everything runs on your machine through native engines
 you already trust (`FFmpeg`, ImageMagick, Ghostscript, …). Nothing is uploaded.
+
+> 🚧 Today the ring is summoned by hotkey, tray, compositor binding or
+> "Open with Orbit". The **Shift-drag-anywhere** trigger is the M4 milestone; the
+> drop target itself is already real and tested, which is what that milestone
+> has to hook into.
 
 > Run one action, or apply a preset to fifty files while you make coffee.
 
@@ -70,16 +78,19 @@ you already trust (`FFmpeg`, ImageMagick, Ghostscript, …). Nothing is uploaded
 
 | | |
 |---|---|
-| 🖱️ **Shift-drag trigger** | No window to find. The ring appears where your cursor is. |
+| 🖱️ **A real drop target** | The ring takes files the moment it is up; nothing to aim at. |
+| ⌨️ **Shift-drag-anywhere** | 🚧 M4 — the global trigger that summons the ring mid-drag. |
 | 🧠 **Context-aware** | A `.mov` offers video petals; a folder of `.png` offers image tools. |
-| 🔁 **845 conversion pairs** | Generated from a data-driven registry — add a format, not code. |
+| 🎛️ **Defaults that work, options when you want them** | Drop to run with sensible values; Alt-click or hold for the panel. |
+| 🔁 **841 conversion pairs** | Generated from a data-driven registry — add a format, not code. |
 | 💾 **Never clobbers your files** | Results land beside the source as `name (converted).ext`, published atomically. |
-| 🧰 **Editing, not just converting** | Resize, crop, trim, rotate, strip EXIF, watermark, merge, split. |
+| 🧰 **Editing, not just converting** | Resize, crop, trim, rotate, strip EXIF, compress, merge, split, OCR. |
+| 🔗 **Merge as one job** | Several images → one PDF or GIF; PDFs → one PDF; audio/video concatenated. |
 | ⚙️ **Batch & presets** | Name a workflow once, reuse it forever. |
 | 🗂️ **Watch folders** | Drop a file in a folder, get a converted one out. |
-| 🔎 **OCR & documents** | Turn scans into searchable PDFs and editable text. |
+| 🔎 **OCR & documents** | Turn scans into text (images today); documents via LibreOffice/Pandoc. |
 | 📜 **History & undo tree** | Every job is recorded; revisit or re-run any step. |
-| ⌨️ **Universal fallbacks** | Global hotkey, tray target, command palette, "Open with Orbit", CLI. |
+| ⌨️ **A hotkey you choose** | Pick one from the tray; it is remembered between launches. |
 | 🕵️ **Private by design** | Zero telemetry, zero network calls, no account, no cloud. |
 
 ## 🖥️ Platform support
@@ -90,16 +101,41 @@ by design, so we say so instead of shipping something flaky.
 
 | Platform | Shift-drag | Fallbacks | Notes |
 |---|---|---|---|
-| **Windows 10/11** | ✅ | hotkey · tray · palette | Low-level mouse/keyboard hooks + drop overlay. |
-| **macOS 12+** | ✅ | hotkey · tray · palette | `NSEvent` monitors; needs Accessibility permission. |
-| **Linux — X11** | ✅ | hotkey · tray · palette | XInput2 / XRecord + XDND. Tested via XWayland too. |
-| **Linux — Wayland** | ⚠️ | tray · palette · Open with · compositor binding | No global Shift-drag **and no in-app hotkey** — see below. |
+| **Windows 10/11** | 🚧 M4 | hotkey · tray · Open with | Low-level mouse/keyboard hooks + drop overlay. |
+| **macOS 12+** | 🚧 M4 | hotkey · tray · Open with | `NSEvent` monitors; needs Accessibility permission. |
+| **Linux — X11** | 🚧 M4 | hotkey · tray · Open with | XInput2 / XRecord + XDND. |
+| **Linux — Wayland** | ⛔ | tray · Open with · compositor binding | No global Shift-drag **and no in-app hotkey** — see below. |
+
+> ✅ **What works on every platform today:** the overlay is a real drop target,
+> the global hotkey (where the OS delivers one), the tray icon, and handing files
+> to Orbit from the shell — `orbit-app photo.png` selects them and opens the ring.
+> That last route is the same one "Open with Orbit" and "Send to" use.
 
 > ⚠️ **Wayland has no global hotkey path at all.** Orbit's hotkey goes through
 > `XGrabKey`, which Wayland deliberately makes inert: the compositor owns input,
 > and XWayland only sees events for the focused X11 window. The grab even
 > *succeeds*, so the failure is silent — Orbit prints a note at startup rather
 > than leaving you pressing keys at nothing.
+
+### ⌨️ Choosing the shortcut
+
+The default trigger is <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> +
+<kbd>Space</kbd>. Change it from **tray menu → Shortcut**: four combinations and
+an **Off** entry, with a ✓ beside the one running now. The choice is saved to
+`settings.json` in the app's config directory (`~/.config/app.orbit.desktop/`
+on Linux, `~/Library/Application Support/app.orbit.desktop/` on macOS,
+`%APPDATA%\app.orbit.desktop\` on Windows) and applied immediately.
+
+Scripts and installers can set it without the tray:
+
+```bash
+orbit-app --hotkey="Ctrl+Alt+O"   # choose a combination
+orbit-app --hotkey=off            # turn the global shortcut off
+```
+
+If another application already owns the combination, Orbit reports that instead
+of failing silently — pick another from the tray. It is a *global* shortcut, so
+it works while Orbit is in the background, and the ring opens under the pointer.
 
 ### ⌨️ Global hotkeys on Wayland
 
@@ -142,6 +178,36 @@ this honestly rather than shipping a blank window:
 
 The result is a glassy ring on macOS/Windows and a solid dark one on Linux. We
 prefer that over a menu that does not appear at all.
+
+## 🎛️ Dropping is the fast path; Alt is the precise one
+
+A plain drop runs the petal with vetted defaults. When you want something else,
+open the options panel without leaving the ring:
+
+- **Alt-click** a petal,
+- **hold** the petal for about half a second,
+- **right-click** it, or
+- click the **⋯** that appears under a hovered petal.
+
+The panel is built from [`registry/options.json`](registry/options.json): the
+widget, range, labels, placeholder and the "only show this when…" rule all come
+from data. <kbd>Tab</kbd> walks the fields, <kbd>Enter</kbd> runs with what is on
+screen, and <kbd>Esc</kbd> closes the panel without running anything.
+
+| Petal | What the panel unlocks |
+|---|---|
+| Convert → PDF (image) | Paper size, margin, orientation, quality |
+| PDF → image | DPI, which page, quality |
+| Merge | Result (PDF / GIF / MP4 / MP3), order (as dragged / by name / oldest first) |
+| Extract pages | `1-3` or `2-` — the range is written into one PDF |
+| Crop | `left,top,width,height`, or ImageMagick's `WxH+X+Y` |
+| OCR | Language and output format |
+
+> 📄 **One page at a time, for now.** Rendering a *range* of PDF pages as a
+> series of images — or a run of video frames — needs the series-output contract
+> that lands in M5. Today `PDF → image` renders the page you choose, and
+> `Extract pages` writes the chosen range into a single PDF. The registry says so
+> in the petal's note rather than pretending otherwise.
 
 ## 🚀 Build from source
 
@@ -200,6 +266,10 @@ cargo run -p orbit-app --features custom-protocol
 #       (Wayland has no in-app hotkey — bind Orbit in your compositor instead;
 #        see the platform section above.)
 
+# Change the trigger, or turn it off; the choice is remembered.
+cargo run -p orbit-app --features custom-protocol -- --hotkey="Ctrl+Alt+O"
+cargo run -p orbit-app --features custom-protocol -- --hotkey=off
+
 # Or hand it files directly (the "Open with Orbit" / "Send to" route):
 cargo run -p orbit-app --features custom-protocol -- ~/Pictures/photo.png
 ```
@@ -253,12 +323,12 @@ chains.json ──┘         rank · validate)
   engine that can do the job works.
 - Read/write support comes from each format's `readers` / `writers` lists.
 - Rules target *families* (`@writable:image`), and the pair matrix multiplies
-  them out — **845 source → target pairs today**, from 22 rules.
+  them out — **841 source → target pairs today**, from 22 rules.
 - The registry **fails loudly** with a readable list when data is inconsistent.
 
 ```console
 $ cargo run -p orbit-registry --example menu -- --pairs
-pairs                    845
+pairs                    841
 engines installed        11
   image -> image                 160
   audio -> audio                  99
@@ -299,19 +369,42 @@ petal pick ─▶ resolve ─▶ plan ─▶ worker pool ─▶ publish ─▶ o
   file never appears under a real name — and a crash cannot leave a torn one.
   Scratch files are cleaned up on every path, including cancellation.
 - **Batches fan out.** One job per file, on half your cores (capped at four), so
-  a fifty-file drop does not turn the machine into a space heater.
+  a fifty-file drop does not turn the machine into a space heater. A **merge** is
+  the exception: it is one job holding every source, because one result is the
+  whole point.
 - **Progress streams to the ring.** The hub shows `2 of 5 done · 41%`, and stays
   open when something fails, with the engine's own reason.
 
-Driven today: **FFmpeg** (audio, video), **ImageMagick** (raster) and **vips**
-(when installed). PDF, document and the built-in `orbit-native` operations arrive
-in M3 — until then they fail with a message that says so, rather than guessing a
-command line at your files.
+Driven today, on top of FFmpeg and ImageMagick:
+
+| Engine | What Orbit asks it to do |
+|---|---|
+| **FFmpeg** | Audio/video conversion, trim, extract audio, GIF with a palette, stills, slideshows, waveform/spectrum video, concatenation |
+| **ImageMagick** | Raster conversion, resize, crop, rotate, flip, grayscale, strip metadata, compress, image → PDF layout, PDF page render |
+| **Poppler** | PDF → text, PDF → PNG/JPEG/TIFF at a chosen DPI |
+| **Ghostscript** | PDF compression (presets), PDF → image, PDF merge |
+| **qpdf** | PDF page extraction, merge, metadata strip, rotate |
+| **LibreOffice** | Document ⇄ PDF, document ⇄ text, document → data |
+| **libheif** | HEIC/HEIF → image |
+| **Tesseract** | OCR for images (PDF OCR lands with the series contract) |
+| **orbit-native** | Built-in image ops (PNG/JPEG/BMP/TIFF), Markdown/plain text → HTML, CSV ↔ JSON |
+
+The built-in **`orbit-native`** engine is compiled into Orbit, so the common image
+edits and the text/table conversions work on a machine with no external tools at
+all. It is deliberately narrow: three output formats for images, and only the
+Markdown and CSV subset it actually implements. Anything else returns a message
+naming the engine that *can* do it.
 
 ```bash
 # The whole pipeline, against the real tools installed on this machine
 cargo test -p orbit-jobs
 ```
+
+The end-to-end tests skip themselves (loudly) when a tool is absent. On this
+machine they drive real `qpdf`, `tesseract`, ImageMagick and FFmpeg — including
+merging PDFs, keeping a page range, stripping metadata, reading a word back from
+a PNG, laying an image onto A4, and writing a JPEG/HTML/JSON through the native
+engine.
 
 ## 🗂️ Project layout
 
@@ -331,15 +424,16 @@ Orbit/
 │   │   ├── src/
 │   │   ├── tests/
 │   │   └── examples/menu.rs  #    dev tool: "what does a .mov offer?"
-│   ├── orbit-jobs/           # ⚙️  resolve · plan · run · publish        (M2)
+│   ├── orbit-jobs/           # ⚙️  resolve · plan · run · publish        (M2–M3)
 │   │   ├── src/resolve.rs    #    petal pick  →  concrete JobRequests
-│   │   ├── src/plan.rs       #    JobRequest  →  argv (pure, async-free)
+│   │   ├── src/plan.rs       #    JobRequest  →  argv / native op (pure)
+│   │   ├── src/native.rs     #    the engine that is not a process
 │   │   ├── src/output.rs     #    naming, scratch files, atomic publish
 │   │   └── src/runner.rs     #    worker pool, cancellation, progress
-│   ├── orbit-app/            # 🪟 Tauri shell: tray, hotkey, overlay, pool (M1–M2)
+│   ├── orbit-app/            # 🪟 Tauri shell: tray, hotkey, overlay, pool (M1–M3)
 │   └── orbit-cli/            # ⌨️  headless `orbit convert …`            (M5)
 ├── scripts/orbit             # ⌨️  `orbit [file …]` launcher + job log
-└── src/                      # ⚛️  React + Vite + Tailwind radial UI      (M1–M2)
+└── src/                      # ⚛️  React + Vite + Tailwind radial UI      (M1–M3)
 ```
 
 ## 🗺️ Roadmap
@@ -348,10 +442,10 @@ Orbit/
 |---|---|---|
 | **M1** | Tray app, global hotkey, transparent overlay, radial menu UI | ✅ shipped |
 | **M2** | Job runner, worker pool, image & audio conversion | ✅ shipped |
-| **M3** | Video / PDF / document engines + editing tools | ⏳ planned |
-| **M4** | Per-OS Shift-drag trigger + shell integration | ⏳ planned |
-| **M5** | Presets, batch, history, watch folders, OCR, CLI | ⏳ planned |
-| **M6** | Onboarding, settings, polish, packaging, CI | ⏳ planned |
+| **M3** | Options panel, PDF/document/OCR engines, merging, native engine, choosable hotkey | ✅ shipped |
+| **M4** | Windows/macOS shell integration: installers, CI, "Open with Orbit" | 🚧 next |
+| **M5** | Series output (page/frame runs), presets, history, watch folders, CLI | ⏳ planned |
+| **M6** | Onboarding, settings surface, polish | ⏳ planned |
 
 ## 🔒 Privacy
 

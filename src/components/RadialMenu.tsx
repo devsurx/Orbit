@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 
 import type { MenuModel, Petal } from "../lib/types";
 
@@ -67,7 +67,12 @@ interface Props {
   onHoverCategory: (id: string | null) => void;
   onHoverPetal: (petal: Petal | null) => void;
   onPick: (petal: Petal) => void;
+  /** Open the options panel for a petal, without running it. */
+  onOptions: (petal: Petal) => void;
 }
+
+/** How long a press has to last before it counts as "show me the options". */
+const HOLD_MS = 450;
 
 export default function RadialMenu({
   model,
@@ -76,6 +81,7 @@ export default function RadialMenu({
   onHoverCategory,
   onHoverPetal,
   onPick,
+  onOptions,
 }: Props) {
   const categories = model.categories;
   const count = categories.length;
@@ -124,37 +130,135 @@ export default function RadialMenu({
       {active?.petals.map((petal, index) => {
         const angle = petalAngle(index, active.petals.length, categoryAngle(activeIndex, count));
         const { x, y } = polar(R_PETAL, angle);
-        const isDisabled = Boolean(petal.disabled);
-        const isHot = hoveredPetal?.id === petal.id && !isDisabled;
         return (
-          <button
+          <PetalButton
             key={petal.id}
-            type="button"
-            disabled={isDisabled}
-            onMouseEnter={() => onHoverPetal(petal)}
-            onMouseLeave={() => onHoverPetal(null)}
-            onClick={() => onPick(petal)}
-            className={[
-              "absolute -translate-x-1/2 -translate-y-1/2 animate-petal rounded-2xl px-3 py-2",
-              "max-w-[8rem] truncate text-xs font-semibold transition-all duration-75",
-              isDisabled
-                ? "cursor-not-allowed bg-ink-800/50 text-white/25 ring-1 ring-white/5"
-                : isHot
-                  ? "scale-[1.08] bg-accent text-white shadow-[0_10px_34px_rgba(110,74,255,.5)]"
-                  : "bg-ink-800/90 text-white/85 ring-1 ring-white/10 hover:bg-ink-700",
-            ].join(" ")}
-            style={{ left: x, top: y }}
-            title={petal.disabled?.reason ?? petal.label}
-          >
-            {tokenOf(petal, active.hidden)}
-            {petal.badge && (
-              <span className="absolute -right-1 -top-2 rounded-full bg-ink-900/90 px-1.5 py-0.5 text-[9px] font-normal text-white/55 ring-1 ring-white/10">
-                {petal.coverage}/{petal.total}
-              </span>
-            )}
-          </button>
+            petal={petal}
+            x={x}
+            y={y}
+            hidden={active.hidden}
+            isHot={hoveredPetal?.id === petal.id && !petal.disabled}
+            onHover={onHoverPetal}
+            onPick={onPick}
+            onOptions={onOptions}
+          />
         );
       })}
     </div>
+  );
+}
+
+interface PetalButtonProps {
+  petal: Petal;
+  x: number;
+  y: number;
+  hidden: number;
+  isHot: boolean;
+  onHover: (petal: Petal | null) => void;
+  onPick: (petal: Petal) => void;
+  onOptions: (petal: Petal) => void;
+}
+
+/**
+ * One petal chip.
+ *
+ * Three ways to reach the options, because the ring is used with a pointer, a
+ * trackpad and a keyboard: Alt-click, right-click, or holding the chip down. A
+ * plain click still runs with the defaults, which is the common case.
+ */
+function PetalButton({
+  petal,
+  x,
+  y,
+  hidden,
+  isHot,
+  onHover,
+  onPick,
+  onOptions,
+}: PetalButtonProps) {
+  const holdTimer = useRef<number | null>(null);
+  // A hold fires `onOptions`, and the release that follows would otherwise fire
+  // a plain pick on top of it.
+  const held = useRef(false);
+  const isDisabled = Boolean(petal.disabled);
+  const hasOptions = (petal.options?.length ?? 0) > 0;
+
+  const stopHold = () => {
+    if (holdTimer.current !== null) {
+      window.clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+  };
+
+  useEffect(() => stopHold, []);
+
+  return (
+    <button
+      type="button"
+      disabled={isDisabled}
+      onMouseEnter={() => onHover(petal)}
+      onMouseLeave={() => {
+        stopHold();
+        onHover(null);
+      }}
+      onPointerDown={() => {
+        if (isDisabled || !hasOptions) {
+          return;
+        }
+        held.current = false;
+        stopHold();
+        holdTimer.current = window.setTimeout(() => {
+          held.current = true;
+          onOptions(petal);
+        }, HOLD_MS);
+      }}
+      onPointerUp={stopHold}
+      onClick={(event) => {
+        if (held.current) {
+          held.current = false;
+          return;
+        }
+        if (event.altKey && hasOptions) {
+          onOptions(petal);
+          return;
+        }
+        onPick(petal);
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        if (hasOptions) {
+          onOptions(petal);
+        }
+      }}
+      className={[
+        "absolute -translate-x-1/2 -translate-y-1/2 animate-petal rounded-2xl px-3 py-2",
+        "max-w-[8rem] truncate text-xs font-semibold transition-all duration-75",
+        isDisabled
+          ? "cursor-not-allowed bg-ink-800/50 text-white/25 ring-1 ring-white/5"
+          : isHot
+            ? "scale-[1.08] bg-accent text-white shadow-[0_10px_34px_rgba(110,74,255,.5)]"
+            : "bg-ink-800/90 text-white/85 ring-1 ring-white/10 hover:bg-ink-700",
+      ].join(" ")}
+      style={{ left: x, top: y }}
+      title={
+        petal.disabled?.reason ??
+        (hasOptions ? `${petal.label} — Alt for options` : petal.label)
+      }
+    >
+      {tokenOf(petal, hidden)}
+      {petal.badge && (
+        <span className="absolute -right-1 -top-2 rounded-full bg-ink-900/90 px-1.5 py-0.5 text-[9px] font-normal text-white/55 ring-1 ring-white/10">
+          {petal.coverage}/{petal.total}
+        </span>
+      )}
+      {hasOptions && isHot && (
+        <span
+          title="Adjust options"
+          className="absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-ink-900/95 px-1.5 text-[10px] leading-4 text-white/70 ring-1 ring-white/15"
+        >
+          ⋯
+        </span>
+      )}
+    </button>
   );
 }

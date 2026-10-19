@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 orbit-jobs = { path = "../orbit-jobs" }
 orbit-registry = { path = "../orbit-registry" }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
