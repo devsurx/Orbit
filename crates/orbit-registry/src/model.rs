@@ -400,6 +400,15 @@ pub struct Action {
     /// Minimum number of dragged files for the action to make sense.
     #[serde(default = "default_requires_files")]
     pub requires_files: u32,
+    /// True when the action folds every dragged file into *one* result instead
+    /// of producing one per file.
+    ///
+    /// This is the difference between "convert these four photos" (four files,
+    /// each named after its own source) and "merge these four PDFs" (one file).
+    /// The two are genuinely different shapes of job, and the resolver has to
+    /// know which it is before it can decide how many requests to emit.
+    #[serde(default)]
+    pub combines: bool,
     /// When set to `conversions`, viability comes from the conversion rules
     /// instead of `engines` (used by the generic Convert action).
     #[serde(default)]
@@ -447,6 +456,12 @@ impl Action {
     #[must_use]
     pub fn engines_for(&self, kind: Kind) -> &[Id] {
         self.engines.get(&kind).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether a plain drop of `count` files has enough to work with.
+    #[must_use]
+    pub fn accepts(&self, count: usize) -> bool {
+        count >= usize::try_from(self.requires_files).unwrap_or(1)
     }
 
     /// Capability tokens to require for this input family.
