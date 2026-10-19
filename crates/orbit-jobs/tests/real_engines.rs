@@ -168,6 +168,88 @@ fn image_request(source: &Path, target_ext: &str, opts: serde_json::Value) -> Jo
     }
 }
 
+/// A real CSV, written rather than generated: the point is the parsing.
+fn make_csv(dir: &Path, name: &str) -> PathBuf {
+    let path = dir.join(name);
+    fs::write(&path, "name,size\norbit,42\n\"with, comma\",7\n").unwrap();
+    path
+}
+
+/// A real Markdown note.
+fn make_markdown(dir: &Path, name: &str) -> PathBuf {
+    let path = dir.join(name);
+    fs::write(
+        &path,
+        "# Orbit\n\nConverts things, *quickly*.\n\n- one\n- two\n\n[site](https://example.com)\n",
+    )
+    .unwrap();
+    path
+}
+
+/// A PDF with the given number of pages, built by `ImageMagick`.
+fn make_pdf(dir: &Path, name: &str, pages: usize) -> PathBuf {
+    let path = dir.join(name);
+    let mut command = Command::new("magick");
+    command.arg("-size").arg("200x300");
+    for page in 0..pages {
+        if page > 0 {
+            command.arg("-size").arg("200x300");
+        }
+        command.arg(if page % 2 == 0 {
+            "xc:white"
+        } else {
+            "xc:black"
+        });
+    }
+    let status = command.arg(&path).status().expect("build a PDF fixture");
+    assert!(status.success(), "could not build the PDF fixture");
+    path
+}
+
+/// A PNG with a word printed on it, for OCR.
+fn make_text_png(dir: &Path, name: &str) -> PathBuf {
+    let path = dir.join(name);
+    let status = Command::new("magick")
+        .args([
+            "-size",
+            "480x140",
+            "xc:white",
+            "-pointsize",
+            "64",
+            "-fill",
+            "black",
+        ])
+        .args(["-annotate", "+28+92", "ORBIT"])
+        .arg(&path)
+        .status()
+        .expect("run magick to build a text fixture");
+    assert!(status.success(), "could not build the text PNG fixture");
+    path
+}
+
+/// What `pdfinfo` says, as `key: value` lines, or None when it is not installed.
+fn pdf_info(path: &Path) -> Option<String> {
+    if !have("pdfinfo") {
+        return None;
+    }
+    let output = Command::new("pdfinfo").arg(path).output().ok()?;
+    assert!(
+        output.status.success(),
+        "pdfinfo failed on {}",
+        path.display()
+    );
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// The page count of a PDF, from `pdfinfo`.
+fn page_count(path: &Path) -> usize {
+    let info = pdf_info(path).expect("pdfinfo is installed (checked by the caller)");
+    info.lines()
+        .find_map(|line| line.strip_prefix("Pages:"))
+        .and_then(|count| count.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no page count in:\n{info}"))
+}
+
 #[test]
 fn magick_really_converts_a_png_to_webp() {
     if !have("magick") {
@@ -306,12 +388,14 @@ fn a_missing_engine_fails_with_a_readable_reason() {
     fs::write(&source, b"not really a png").unwrap();
 
     let events = run(JobRequest {
-        engine: "ghostscript".to_owned(), // not driven yet
-        program: PathBuf::from("gs"),
-        kind: Kind::Image,
-        action: "convert".to_owned(),
-        target_ext: "pdf".to_owned(),
-        tag: "converted".to_owned(),
+        // libvips is driven for conversions only: asking it to trim is the
+        // shape of request the planner has to refuse rather than guess at.
+        engine: "vips".to_owned(),
+        program: PathBuf::from("vips"),
+        kind: Kind::Video,
+        action: "trim".to_owned(),
+        target_ext: "mp4".to_owned(),
+        tag: "trimmed".to_owned(),
         sources: vec![source],
         options: options(json!({})),
         output_dir: None,
@@ -320,7 +404,7 @@ fn a_missing_engine_fails_with_a_readable_reason() {
     match &events.last().unwrap().state {
         JobState::Failed { message } => {
             assert!(
-                message.contains("M3"),
+                message.contains("M5"),
                 "should name the milestone: {message}"
             );
         }
@@ -333,4 +417,276 @@ fn a_missing_engine_fails_with_a_readable_reason() {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(entries, ["holiday.png"], "only the source remains");
+}
+
+// --------------------------------------------------------------------------
+// M3: the engines and shapes added after the first milestone.
+// --------------------------------------------------------------------------
+
+/// A request against a named engine.
+///
+/// The program is the engine's own name: for every engine these tests drive, the
+/// binary and the registry id are spelled the same way.
+fn engine_request(
+    engine: &str,
+    action: &str,
+    kind: Kind,
+    target_ext: &str,
+    tag: &str,
+    sources: Vec<PathBuf>,
+    opts: serde_json::Value,
+) -> JobRequest {
+    JobRequest {
+        engine: engine.to_owned(),
+        program: PathBuf::from(engine),
+        kind,
+        action: action.to_owned(),
+        target_ext: target_ext.to_owned(),
+        tag: tag.to_owned(),
+        sources,
+        options: options(opts),
+        output_dir: None,
+    }
+}
+
+#[test]
+fn qpdf_really_merges_pdfs_into_one() {
+    if !have("qpdf") || !have("magick") || !have("pdfinfo") {
+        eprintln!("skipping: qpdf, ImageMagick and pdfinfo are needed for this one");
+        return;
+    }
+    let dir = TempDir::new("qpdf-merge");
+    let first = make_pdf(dir.path(), "one.pdf", 2);
+    let second = make_pdf(dir.path(), "two.pdf", 1);
+
+    // The merge is one job with many sources, which is the whole point of it.
+    let events = run(engine_request(
+        "qpdf",
+        "merge",
+        Kind::Pdf,
+        "pdf",
+        "merged",
+        vec![first.clone(), second.clone()],
+        json!({ "merge_output": "pdf", "merge_order": "as_dragged" }),
+    ));
+    let published = done_path(&events);
+
+    assert_eq!(
+        published.file_name().unwrap(),
+        "one (merged).pdf",
+        "the result is named after the file it was dragged from first"
+    );
+    assert_eq!(page_count(&published), 3, "2 + 1 pages");
+    assert!(first.exists() && second.exists(), "sources are untouched");
+}
+
+#[test]
+fn qpdf_really_keeps_only_the_pages_asked_for() {
+    if !have("qpdf") || !have("magick") || !have("pdfinfo") {
+        eprintln!("skipping: qpdf, ImageMagick and pdfinfo are needed for this one");
+        return;
+    }
+    let dir = TempDir::new("qpdf-pages");
+    let source = make_pdf(dir.path(), "report.pdf", 4);
+
+    let events = run(engine_request(
+        "qpdf",
+        "extract_pages",
+        Kind::Pdf,
+        "pdf",
+        "pages",
+        vec![source],
+        json!({ "pages": "2-3" }),
+    ));
+    let published = done_path(&events);
+
+    assert_eq!(published.file_name().unwrap(), "report (pages).pdf");
+    assert_eq!(page_count(&published), 2, "the range, and nothing else");
+}
+
+#[test]
+fn qpdf_really_takes_the_metadata_out() {
+    if !have("qpdf") || !have("magick") || !have("pdfinfo") {
+        eprintln!("skipping: qpdf, ImageMagick and pdfinfo are needed for this one");
+        return;
+    }
+    let dir = TempDir::new("qpdf-clean");
+    let source = make_pdf(dir.path(), "report.pdf", 1);
+    let before = pdf_info(&source).expect("readable");
+    assert!(
+        before.contains("Producer:"),
+        "the fixture should carry metadata to remove:\n{before}"
+    );
+
+    let events = run(engine_request(
+        "qpdf",
+        "strip_metadata",
+        Kind::Pdf,
+        "pdf",
+        "clean",
+        vec![source],
+        json!({}),
+    ));
+    let published = done_path(&events);
+
+    assert_eq!(published.file_name().unwrap(), "report (clean).pdf");
+    let after = pdf_info(&published).expect("readable");
+    assert!(
+        !after.contains("Producer:"),
+        "metadata should be gone:\n{after}"
+    );
+    assert_eq!(page_count(&published), 1, "the page itself survives");
+}
+
+#[test]
+fn tesseract_really_reads_a_word_from_a_png() {
+    if !have("tesseract") {
+        eprintln!("skipping: tesseract is not installed (set PATH/TESSDATA_PREFIX)");
+        return;
+    }
+    if !have("magick") {
+        eprintln!("skipping: ImageMagick is needed for the text fixture");
+        return;
+    }
+    let dir = TempDir::new("tesseract-ocr");
+    let source = make_text_png(dir.path(), "sign.png");
+
+    let events = run(engine_request(
+        "tesseract",
+        "ocr",
+        Kind::Image,
+        "txt",
+        "text",
+        vec![source],
+        json!({ "ocr_output": "txt" }),
+    ));
+    let published = done_path(&events);
+
+    assert_eq!(published.file_name().unwrap(), "sign (text).txt");
+    let text = fs::read_to_string(&published).unwrap();
+    assert!(
+        text.to_uppercase().contains("ORBIT"),
+        "tesseract should have read the word back: {text:?}"
+    );
+}
+
+#[test]
+fn magick_really_lays_a_png_onto_an_a4_page() {
+    if !have("magick") || !have("pdfinfo") {
+        eprintln!("skipping: ImageMagick and pdfinfo are needed for this one");
+        return;
+    }
+    let dir = TempDir::new("magick-a4");
+    let source = make_png(dir.path(), "holiday.png");
+
+    let events = run(engine_request(
+        "magick",
+        "convert",
+        Kind::Image,
+        "pdf",
+        "converted",
+        vec![source],
+        json!({ "page": "a4", "margin": "0cm", "orientation": "auto", "quality": 85 }),
+    ));
+    let published = done_path(&events);
+
+    assert_eq!(published.file_name().unwrap(), "holiday (converted).pdf");
+    let info = pdf_info(&published).unwrap();
+    // A4 is 595 x 842 points; a page that stretched to the image's 64 x 48
+    // pixels would say so here.
+    assert!(
+        info.contains("595") && info.contains("842"),
+        "the page should be A4:\n{info}"
+    );
+}
+
+#[test]
+fn the_native_engine_really_writes_a_jpeg() {
+    if !have("magick") {
+        eprintln!("skipping: ImageMagick is needed for the BMP fixture");
+        return;
+    }
+    let dir = TempDir::new("native-jpeg");
+    // A BMP source, because that is the format the built-in engine had to learn
+    // to read and write itself.
+    let source = dir.path().join("flat.bmp");
+    let status = Command::new("magick")
+        .args(["-size", "32x24", "gradient:red-blue"])
+        .arg(&source)
+        .status()
+        .expect("run magick to build the BMP fixture");
+    assert!(status.success(), "could not build the BMP fixture");
+
+    let events = run(engine_request(
+        "orbit-native",
+        "convert",
+        Kind::Image,
+        "jpg",
+        "converted",
+        vec![source],
+        json!({ "quality": 80 }),
+    ));
+    let published = done_path(&events);
+
+    assert_eq!(published.file_name().unwrap(), "flat (converted).jpg");
+    let bytes = fs::read(&published).unwrap();
+    assert_eq!(&bytes[0..2], &[0xFF, 0xD8], "a real JPEG start-of-image");
+    assert!(bytes.len() > 100, "the pixels made it into the file");
+}
+
+#[test]
+fn the_native_engine_really_turns_markdown_into_html() {
+    let dir = TempDir::new("native-html");
+    let source = make_markdown(dir.path(), "notes.md");
+
+    let events = run(engine_request(
+        "orbit-native",
+        "convert",
+        Kind::Text,
+        "html",
+        "converted",
+        vec![source],
+        json!({}),
+    ));
+    let published = done_path(&events);
+
+    assert_eq!(published.file_name().unwrap(), "notes (converted).html");
+    let html = fs::read_to_string(&published).unwrap();
+    assert!(html.contains("<h1>Orbit</h1>"), "{html}");
+    assert!(html.contains("<li>one</li>"), "{html}");
+    assert!(
+        html.contains("<a href=\"https://example.com\">site</a>"),
+        "{html}"
+    );
+}
+
+#[test]
+fn the_native_engine_really_turns_csv_into_json() {
+    let dir = TempDir::new("native-json");
+    let source = make_csv(dir.path(), "parts.csv");
+
+    let events = run(engine_request(
+        "orbit-native",
+        "convert",
+        Kind::Data,
+        "json",
+        "converted",
+        vec![source],
+        // The resolver fills this from the petal's defaults; a raw request has
+        // to say it, which is exactly the contract the runner documents.
+        json!({ "delimiter": ",", "header": true }),
+    ));
+    let published = done_path(&events);
+
+    assert_eq!(published.file_name().unwrap(), "parts (converted).json");
+    let text = fs::read_to_string(&published).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON came out");
+    let rows = parsed.as_array().expect("an array of rows");
+    assert_eq!(rows.len(), 2, "two records, header not counted");
+    assert_eq!(rows[0]["name"], "orbit");
+    assert_eq!(rows[0]["size"], 42, "a number stays a number");
+    assert_eq!(
+        rows[1]["name"], "with, comma",
+        "quoting survives the round trip"
+    );
 }

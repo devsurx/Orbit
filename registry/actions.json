@@ -68,10 +68,11 @@
     "options": ["merge_output", "merge_order", "quality"],
     "defaults": { "merge_output": "pdf", "merge_order": "as_dragged" },
     "requires_files": 2,
+    "combines": true,
     "rank": 85,
     "tag": "merged",
     "output_ext": "pdf",
-    "note": "Needs at least two files: PDFs become one PDF, images one PDF or GIF, video and audio are concatenated in drag order."
+    "note": "Needs at least two files, and folds them into one: PDFs into a PDF, images into a PDF or GIF, video and audio concatenated in drag order. The result is named after the first file."
   },
   {
     "id": "trim",
@@ -110,11 +111,11 @@
     "engines": { "pdf": ["qpdf", "poppler"] },
     "requires": { "pdf": ["op:pdf_split"] },
     "options": ["pages"],
-    "defaults": { "pages": "1-" },
+    "defaults": { "pages": "1" },
     "rank": 60,
     "tag": "pages",
     "output_ext": "pdf",
-    "note": "One file per page or per range, written next to the original."
+    "note": "The selected pages become one new PDF beside the original; a plain drop takes page one. One file per page lands with the series-output contract in M5."
   },
   {
     "id": "extract_frames",
@@ -124,11 +125,12 @@
     "applies_to": [{ "kind": "video" }],
     "engines": { "video": ["ffmpeg"] },
     "requires": { "video": ["op:extract_frames"] },
-    "options": ["time", "count", "scale"],
-    "defaults": { "time": 1, "count": 1 },
+    "options": ["time", "scale"],
+    "defaults": { "time": 1 },
     "rank": 55,
     "tag": "frame",
-    "output_ext": "png"
+    "output_ext": "png",
+    "note": "One frame at a time, at the chosen timestamp. The time needs a frame-stepping picker before a count is worth offering."
   },
   {
     "id": "resize",
@@ -191,15 +193,15 @@
     "label": "Read text (OCR)",
     "category": "more",
     "icon": "scan-text",
-    "applies_to": [{ "kind": "image" }, { "format": "pdf" }],
-    "engines": { "image": ["tesseract"], "pdf": ["tesseract"] },
-    "requires": { "image": ["op:ocr"], "pdf": ["op:ocr"] },
-    "options": ["ocr_lang", "ocr_output", "pages"],
+    "applies_to": [{ "kind": "image" }],
+    "engines": { "image": ["tesseract"] },
+    "requires": { "image": ["op:ocr"] },
+    "options": ["ocr_lang", "ocr_output"],
     "defaults": { "ocr_lang": "auto", "ocr_output": "txt" },
     "rank": 30,
     "tag": "text",
     "output_ext": "txt",
-    "note": "Fully offline. Language data is fetched once, only if OCR is used."
+    "note": "Fully offline, and images only for now: reading a scanned PDF means rasterising each page first, which arrives with chains in M5."
   },
   {
     "id": "rotate",

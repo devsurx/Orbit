@@ -8,7 +8,7 @@
     "signature": ["89504E470D0A1A0A"],
     "can": { "read": true, "write": true },
     "readers": ["vips", "magick", "ffmpeg", "orbit-native"],
-    "writers": ["vips", "magick", "ffmpeg", "libheif", "poppler"],
+    "writers": ["vips", "magick", "ffmpeg", "libheif", "poppler", "orbit-native"],
     "properties": { "lossy": false, "alpha": true, "animated": true },
     "tags": ["lossless", "web", "alpha"],
     "rank": 50
@@ -22,7 +22,7 @@
     "signature": ["FFD8FF"],
     "can": { "read": true, "write": true },
     "readers": ["vips", "magick", "ffmpeg", "libheif", "orbit-native"],
-    "writers": ["vips", "magick", "ffmpeg", "libheif", "poppler"],
+    "writers": ["vips", "magick", "ffmpeg", "libheif", "poppler", "orbit-native"],
     "properties": { "lossy": true },
     "tags": ["web", "photo"],
     "rank": 45
@@ -94,7 +94,7 @@
     "signature": ["424D"],
     "can": { "read": true, "write": true },
     "readers": ["vips", "magick", "ffmpeg", "orbit-native"],
-    "writers": ["vips", "magick", "ffmpeg"],
+    "writers": ["vips", "magick", "ffmpeg", "orbit-native"],
     "properties": { "lossy": false },
     "tags": ["legacy", "windows"],
     "rank": 5
@@ -615,7 +615,7 @@
     "signature": ["25504446"],
     "can": { "read": true, "write": true },
     "readers": ["poppler", "ghostscript", "magick", "qpdf", "libreoffice"],
-    "writers": ["libreoffice", "ghostscript", "magick", "orbit-native"],
+    "writers": ["libreoffice", "ghostscript", "magick"],
     "properties": { "multipage": true, "searchable": true },
     "tags": ["document", "universal"],
     "rank": 45
@@ -813,8 +813,8 @@
     "extensions": ["yaml", "yml"],
     "mimes": ["application/yaml"],
     "can": { "read": true, "write": true },
-    "readers": ["orbit-native", "pandoc"],
-    "writers": ["orbit-native", "pandoc"],
+    "readers": ["pandoc"],
+    "writers": ["pandoc"],
     "properties": {},
     "tags": ["data"],
     "rank": 10

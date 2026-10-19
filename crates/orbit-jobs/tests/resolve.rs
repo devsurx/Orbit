@@ -223,6 +223,174 @@ fn every_request_names_one_source() {
 }
 
 #[test]
+fn a_merge_becomes_one_job_holding_every_source() {
+    // The whole point of a merge is one result, so it is a single job with many
+    // sources rather than one job per file.
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &action("merge"),
+        &[
+            PathBuf::from("/tmp/orbit/a.png"),
+            PathBuf::from("/tmp/orbit/b.png"),
+        ],
+    )
+    .expect("resolves");
+
+    assert_eq!(resolution.requests.len(), 1);
+    assert_eq!(resolution.requests[0].sources.len(), 2);
+    assert_eq!(resolution.requests[0].target_ext, "pdf");
+    assert_eq!(resolution.requests[0].tag, "merged");
+    assert!(resolution.skipped.is_empty(), "{:?}", resolution.skipped);
+}
+
+#[test]
+fn a_merged_result_can_be_a_gif_instead() {
+    let pick = Pick {
+        kind: PickKind::Action,
+        reference: "merge".to_owned(),
+        defaults: Options::from_iter([("merge_output".to_owned(), serde_json::json!("gif"))]),
+    };
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &pick,
+        &[
+            PathBuf::from("/tmp/orbit/a.png"),
+            PathBuf::from("/tmp/orbit/b.png"),
+        ],
+    )
+    .expect("resolves");
+
+    assert_eq!(resolution.requests[0].target_ext, "gif");
+}
+
+#[test]
+fn a_result_the_family_cannot_use_falls_back_to_its_own() {
+    // One option catalog serves every family, so the panel offers "audio" for a
+    // batch of pictures as well. Choosing it means the family default, not a
+    // run that dies inside the engine.
+    let pick = Pick {
+        kind: PickKind::Action,
+        reference: "merge".to_owned(),
+        defaults: Options::from_iter([("merge_output".to_owned(), serde_json::json!("audio"))]),
+    };
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &pick,
+        &[
+            PathBuf::from("/tmp/orbit/a.png"),
+            PathBuf::from("/tmp/orbit/b.png"),
+        ],
+    )
+    .expect("resolves");
+
+    assert_eq!(resolution.requests[0].target_ext, "pdf");
+}
+
+#[test]
+fn a_merge_leaves_a_file_of_another_family_alone() {
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &action("merge"),
+        &[
+            PathBuf::from("/tmp/orbit/a.png"),
+            PathBuf::from("/tmp/orbit/b.png"),
+            PathBuf::from("/tmp/orbit/tone.wav"),
+        ],
+    )
+    .expect("resolves");
+
+    assert_eq!(resolution.requests.len(), 1);
+    assert_eq!(resolution.requests[0].sources.len(), 2);
+    assert_eq!(resolution.skipped.len(), 1);
+    assert!(
+        resolution.skipped[0].reason.contains("image"),
+        "{}",
+        resolution.skipped[0].reason
+    );
+}
+
+#[test]
+fn a_merge_of_one_file_is_refused_with_a_reason() {
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &action("merge"),
+        &[PathBuf::from("/tmp/orbit/a.png")],
+    )
+    .expect("resolves");
+
+    assert!(resolution.is_empty());
+    assert!(
+        resolution.first_reason().unwrap().contains("at least 2"),
+        "{:?}",
+        resolution.skipped
+    );
+}
+
+#[test]
+fn merge_order_by_name_ignores_the_drag_order() {
+    let pick = Pick {
+        kind: PickKind::Action,
+        reference: "merge".to_owned(),
+        defaults: Options::from_iter([("merge_order".to_owned(), serde_json::json!("name"))]),
+    };
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &pick,
+        &[
+            PathBuf::from("/tmp/orbit/b.png"),
+            PathBuf::from("/tmp/orbit/a.png"),
+        ],
+    )
+    .expect("resolves");
+
+    let first = resolution.requests[0].sources[0].file_name().unwrap();
+    assert_eq!(first, "a.png");
+}
+
+#[test]
+fn a_merge_names_an_engine_it_needs_rather_than_using_the_wrong_one() {
+    // Only `ImageMagick` is installed, and it cannot merge PDFs: the job is
+    // reported as needing qpdf or Ghostscript, not handed to magick to fail.
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &action("merge"),
+        &[
+            PathBuf::from("/tmp/orbit/one.pdf"),
+            PathBuf::from("/tmp/orbit/two.pdf"),
+        ],
+    )
+    .expect("resolves");
+
+    assert!(resolution.is_empty());
+    let reason = resolution.first_reason().expect("a reason");
+    assert!(reason.contains("not installed"), "{reason}");
+}
+
+#[test]
+fn a_pdf_merge_uses_qpdf_when_it_is_there() {
+    let resolution = resolve_pick(
+        &registry(),
+        &engines(&[("qpdf", "/usr/bin/qpdf")]),
+        &action("merge"),
+        &[
+            PathBuf::from("/tmp/orbit/one.pdf"),
+            PathBuf::from("/tmp/orbit/two.pdf"),
+        ],
+    )
+    .expect("resolves");
+
+    assert_eq!(resolution.requests[0].engine, "qpdf");
+    assert_eq!(resolution.requests[0].target_ext, "pdf");
+}
+
+#[test]
 fn an_unknown_action_is_refused() {
     let error = resolve_pick(&registry(), &installed(), &action("time-travel"), &[]).unwrap_err();
     assert_eq!(error, ResolveError::UnknownAction("time-travel".to_owned()));

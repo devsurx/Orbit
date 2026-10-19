@@ -231,6 +231,15 @@
     "placeholder": "1-3,7",
     "help": "Ranges and single pages, for example 1-3,7."
   },
+  "pdf_page": {
+    "key": "pdf_page",
+    "label": "Page",
+    "type": "int",
+    "min": 1,
+    "max": 5000,
+    "default": 1,
+    "help": "Which page to render. Rendering a whole document as a series of images lands in M5."
+  },
   "layout": {
     "key": "layout",
     "label": "Keep layout",

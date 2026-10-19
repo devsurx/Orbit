@@ -8,12 +8,12 @@
     "platforms": ["macos-arm64", "macos-x64", "windows-x64", "windows-arm64", "linux-x64", "linux-arm64"],
     "provides": [
       "op:resize", "op:crop", "op:rotate", "op:flip", "op:grayscale",
-      "op:strip_metadata", "op:append", "op:thumbnail", "op:compress",
-      "op:image_layout", "op:tabular_convert", "op:markup"
+      "op:strip_metadata", "op:thumbnail", "op:compress",
+      "op:tabular_convert", "op:markup"
     ],
     "progress": "none",
     "cost": 1,
-    "note": "Rust code compiled into Orbit: basic geometry, metadata stripping, tabular and markup conversion. No sidecar, always available, used when a heavier engine is missing."
+    "note": "Rust code compiled into Orbit: image geometry, metadata-free re-encoding, tabular and markup conversion. No sidecar, always available, used when a heavier engine is missing. What it can do is what it declares here — laying images out into a PDF is not in this list yet, so that conversion is never offered on its say-so."
   },
   {
     "id": "vips",

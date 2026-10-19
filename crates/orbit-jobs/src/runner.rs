@@ -12,7 +12,8 @@
 //!   removed by [`crate::output::OutputPlan`]'s drop, including on cancellation.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read};
+use std::fs;
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,7 +24,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::plan::{JobRequest, ProgressMode, plan};
+use crate::native;
+use crate::plan::{AuxFile, Backend, CommandSpec, JobRequest, Plan, ProgressMode, plan};
 
 /// How long a worker waits between cancellation checks while a child runs.
 const POLL: Duration = Duration::from_millis(80);
@@ -212,9 +214,11 @@ enum Failure {
     Plan(String),
     /// The engine exited non-zero.
     Exit(String),
+    /// The built-in engine gave up.
+    Native(String),
     /// The user cancelled.
     Cancelled,
-    /// Spawning or publishing failed.
+    /// Spawning, preparing or publishing failed.
     Io(String),
 }
 
@@ -251,9 +255,12 @@ fn run_job(job: &Job, emit: &Emitter, cancels: &Cancels, closed: &AtomicBool) {
         match outcome {
             Ok(path) => JobState::Done { path },
             Err(Failure::Cancelled) => JobState::Cancelled,
-            Err(Failure::Plan(message) | Failure::Exit(message) | Failure::Io(message)) => {
-                JobState::Failed { message }
-            }
+            Err(
+                Failure::Plan(message)
+                | Failure::Exit(message)
+                | Failure::Native(message)
+                | Failure::Io(message),
+            ) => JobState::Failed { message },
         },
     );
 }
@@ -270,19 +277,55 @@ fn report(emit: &Emitter, job: &Job, state: JobState) {
 fn execute(job: &Job, emit: &Emitter, cancel: &AtomicBool) -> Result<PathBuf, Failure> {
     let planned = plan(&job.request).map_err(|error| Failure::Plan(error.to_string()))?;
 
-    let duration = match planned.command.progress {
-        ProgressMode::FfmpegKeyValue => planned
-            .command
-            .media_input
-            .as_deref()
-            .and_then(probe_duration),
-        ProgressMode::None => None,
+    // The engine's side files — ffmpeg's concat list, LibreOffice's private
+    // directory — are removed however this job ends, including cancellation.
+    let sidecar = Sidecar::of(&planned.backend);
+    sidecar
+        .prepare()
+        .map_err(|error| Failure::Io(error.to_string()))?;
+
+    let duration = match &planned.backend {
+        Backend::Process(spec) if spec.progress == ProgressMode::FfmpegKeyValue => {
+            spec.media_input.as_deref().and_then(probe_duration)
+        }
+        _ => None,
     };
 
     report(emit, job, JobState::Running { percent: None });
 
-    let mut child = Command::new(&planned.command.program)
-        .args(&planned.command.args)
+    // The built-in engine is a function call, not a child process: it writes
+    // the same scratch file and reports the same failure words.
+    let status = match &planned.backend {
+        Backend::Native(op) => {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Failure::Cancelled);
+            }
+            native::run(op, planned.output.scratch_path())
+                .map_err(|error| Failure::Native(error.to_string()))?;
+            Ok(())
+        }
+        Backend::Process(spec) => run_process(spec, emit, job, cancel, duration),
+    };
+    status?;
+
+    collect(&planned)?;
+
+    planned
+        .output
+        .commit()
+        .map_err(|error| Failure::Io(error.to_string()))
+}
+
+/// Spawn the engine and wait for it, reporting progress and honouring cancels.
+fn run_process(
+    spec: &CommandSpec,
+    emit: &Emitter,
+    job: &Job,
+    cancel: &AtomicBool,
+    duration: Option<f64>,
+) -> Result<(), Failure> {
+    let mut child = Command::new(&spec.program)
+        .args(&spec.args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -328,11 +371,102 @@ fn execute(job: &Job, emit: &Emitter, cancel: &AtomicBool) -> Result<PathBuf, Fa
             last_line(&stderr).unwrap_or_else(|| format!("engine exited with {code}")),
         ));
     }
+    Ok(())
+}
 
-    planned
-        .output
-        .commit()
+/// Move an engine-named result onto the scratch path.
+///
+/// `LibreOffice` writes `<stem>.<ext>` where it likes and cannot be told
+/// otherwise. Anything else — `pdftoppm`, `tesseract` — appends a known
+/// extension to a prefix the planner chose, so it already lands on the scratch
+/// path and this does nothing.
+fn collect(planned: &Plan) -> Result<(), Failure> {
+    let Backend::Process(spec) = &planned.backend else {
+        return Ok(());
+    };
+    let Some(collected) = &spec.collected else {
+        return Ok(());
+    };
+
+    let wanted = collected.dir.join(&collected.name);
+    let source = if wanted.is_file() {
+        wanted
+    } else {
+        // The engine renamed it, or wrote it under a stem of its own choosing:
+        // take the file it did write, as long as there is exactly one.
+        Sidecar::single_output(&collected.dir).ok_or_else(|| {
+            Failure::Exit(format!("the engine wrote nothing named {}", collected.name))
+        })?
+    };
+
+    fs::rename(&source, planned.output.scratch_path())
         .map_err(|error| Failure::Io(error.to_string()))
+}
+
+/// Side paths the engine needs that are not the result.
+///
+/// Created before the run and removed after it, whatever the outcome: a job
+/// that fails must leave the folder exactly as it found it.
+struct Sidecar {
+    dirs: Vec<PathBuf>,
+    aux: Vec<AuxFile>,
+}
+
+impl Sidecar {
+    fn of(backend: &Backend) -> Self {
+        match backend {
+            Backend::Native(_) => Self {
+                dirs: Vec::new(),
+                aux: Vec::new(),
+            },
+            Backend::Process(spec) => Self {
+                dirs: spec.work_dirs.clone(),
+                aux: spec.aux_files.clone(),
+            },
+        }
+    }
+
+    /// Create the work directories and write the auxiliary files.
+    fn prepare(&self) -> io::Result<()> {
+        for dir in &self.dirs {
+            fs::create_dir_all(dir)?;
+        }
+        for aux in &self.aux {
+            // A relative scratch path has an empty parent, which is the
+            // current directory and needs no creating.
+            if let Some(parent) = aux
+                .path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&aux.path, &aux.contents)?;
+        }
+        Ok(())
+    }
+
+    /// The one file an engine left in `dir`, when there is exactly one.
+    fn single_output(dir: &Path) -> Option<PathBuf> {
+        let mut candidates = fs::read_dir(dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file());
+        let first = candidates.next()?;
+        candidates.next().is_none().then_some(first)
+    }
+}
+
+impl Drop for Sidecar {
+    fn drop(&mut self) {
+        for aux in &self.aux {
+            let _ = fs::remove_file(&aux.path);
+        }
+        for dir in &self.dirs {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
 }
 
 /// Follow ffmpeg's `-progress` stream on its own thread and report movement.

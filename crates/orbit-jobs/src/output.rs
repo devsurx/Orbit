@@ -92,6 +92,18 @@ impl OutputPlan {
         &self.scratch_path
     }
 
+    /// A hidden path beside the scratch file, for the extra files some engines
+    /// need: ffmpeg's concat list, `LibreOffice`'s private directory.
+    ///
+    /// Named after the scratch file rather than the destination, so it inherits
+    /// this job's process id and counter. Two jobs writing into one folder can
+    /// therefore never collide, which matters because the scratch counter is
+    /// per process and two Orbit windows can share a folder.
+    #[must_use]
+    pub fn scratch_sibling(&self, label: &str) -> PathBuf {
+        scratch_sibling(&self.scratch_path, label)
+    }
+
     /// Publish the engine's output under the reserved name.
     ///
     /// Uses a hard link so the publish cannot overwrite a file that appeared
@@ -142,6 +154,17 @@ fn variant_name(stem: &str, tag: &str, ext: &str, variant: u32) -> String {
     } else {
         format!("{stem} ({tag} {variant}).{ext}")
     }
+}
+
+/// Also used by the planner, which has to name its side files before there is
+/// an [`OutputPlan`] to ask.
+#[must_use]
+pub fn scratch_sibling(scratch: &Path, label: &str) -> PathBuf {
+    let name = match scratch.file_stem() {
+        Some(stem) => format!("{}.{label}", stem.to_string_lossy()),
+        None => format!(".orbit-{label}"),
+    };
+    scratch.with_file_name(name)
 }
 
 /// Create a hidden, unused scratch file that keeps the destination extension.

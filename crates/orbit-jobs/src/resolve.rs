@@ -15,10 +15,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use orbit_registry::{
-    Action, EngineStatus, Format, Probe, Registry, Rule, SourceFile, any_selector_matches,
+    Action, EngineStatus, Format, Kind, Probe, Registry, Rule, SourceFile, any_selector_matches,
 };
+use serde_json::Value;
 
 use crate::plan::{JobRequest, Options};
 
@@ -27,6 +29,10 @@ const CONVERT: &str = "convert";
 
 /// The `output_ext` value meaning "whatever the input had".
 const KEEP_EXT: &str = "same";
+
+/// The option that says what a merge produces, and its values.
+const MERGE_OUTPUT: &str = "merge_output";
+const MERGE_ORDER: &str = "merge_order";
 
 /// Stand-in tag, used only if the registry somehow lacks the convert action.
 const FALLBACK_TAG: &str = "converted";
@@ -125,12 +131,13 @@ pub enum ResolveError {
     NotAJob(String),
 }
 
-/// Resolve a pick into one job per dragged file it suits.
+/// Resolve a pick into the jobs it describes.
 ///
-/// One job per file rather than one for the batch: a conversion writes its
-/// result beside its source, so every file needs its own output name, its own
-/// progress and its own failure. Actions that genuinely combine their inputs
-/// (merge) are not driven yet and say so from [`plan`](crate::plan).
+/// Most picks give one job per dragged file: a conversion writes its result
+/// beside its source, so every file needs its own output name, its own progress
+/// and its own failure. A *combining* action is the exception — a merge is one
+/// job with many sources, because its whole point is that the result is one
+/// file.
 ///
 /// # Errors
 /// Fails when the pick itself makes no sense: an unknown action or format, a
@@ -146,18 +153,11 @@ pub fn resolve_pick(
     let available = orbit_registry::available_ids(statuses);
     let intent = Intent::from_pick(registry, pick)?;
 
-    let mut resolution = Resolution::default();
-    for path in sources {
-        let file = probe_file(registry, path);
-        match intent.request(registry, statuses, &available, pick, path, &file) {
-            Ok(request) => resolution.requests.push(request),
-            Err(reason) => resolution.skipped.push(Skipped {
-                path: path.clone(),
-                reason,
-            }),
-        }
-    }
-    Ok(resolution)
+    Ok(if intent.combines() {
+        intent.combine(registry, statuses, &available, pick, sources)
+    } else {
+        intent.each(registry, statuses, &available, pick, sources)
+    })
 }
 
 /// A pick with everything that can be decided before the files are considered.
@@ -175,9 +175,20 @@ enum Intent {
     Edit {
         /// The action itself, copied so the registry borrow ends here.
         action: Box<Action>,
-        /// Extension the result carries, or `None` to keep the input's.
-        ext: Option<String>,
+        /// How the result's extension is decided.
+        ext: ExtRule,
     },
+}
+
+/// How an action's output extension is decided.
+enum ExtRule {
+    /// Fixed by the registry, such as `pages` always producing a PDF.
+    Fixed(String),
+    /// Whatever the input had.
+    Keep,
+    /// Chosen by an option and the family, which is what a merge does: the same
+    /// action writes a PDF, a GIF, an MP4 or an MP3 depending on its inputs.
+    Merge,
 }
 
 /// The per-file facts a request is built from.
@@ -198,6 +209,8 @@ struct Spec<'a> {
     requires: Vec<String>,
     /// Format being written, when it is a concrete one.
     target: Option<&'a Format>,
+    /// What the file is, so the engine choice can check readers and writers.
+    probe: Probe,
 }
 
 impl Intent {
@@ -229,9 +242,13 @@ impl Intent {
                 let action = registry
                     .action(&pick.reference)
                     .ok_or_else(|| ResolveError::UnknownAction(pick.reference.clone()))?;
-                let ext = match action.output_ext.as_str() {
-                    KEEP_EXT => None,
-                    concrete => Some(concrete.to_owned()),
+                let ext = if action.combines {
+                    ExtRule::Merge
+                } else {
+                    match action.output_ext.as_str() {
+                        KEEP_EXT => ExtRule::Keep,
+                        concrete => ExtRule::Fixed(concrete.to_owned()),
+                    }
                 };
                 Ok(Self::Edit {
                     action: Box::new(action.clone()),
@@ -241,11 +258,145 @@ impl Intent {
         }
     }
 
+    /// True when the action folds its inputs into one result.
+    fn combines(&self) -> bool {
+        match self {
+            Self::Edit { action, .. } => action.combines,
+            Self::Convert { .. } => false,
+        }
+    }
+
+    /// One job per file the pick suits.
+    fn each(
+        &self,
+        registry: &Registry,
+        statuses: &BTreeMap<String, EngineStatus>,
+        available: &BTreeSet<String>,
+        pick: &Pick,
+        sources: &[PathBuf],
+    ) -> Resolution {
+        let mut resolution = Resolution::default();
+        for path in sources {
+            let file = probe_file(registry, path);
+            let assembled = self.spec(registry, &file, &pick.defaults).and_then(|spec| {
+                assemble(
+                    registry,
+                    statuses,
+                    available,
+                    &spec,
+                    vec![path.clone()],
+                    pick,
+                )
+            });
+            match assembled {
+                Ok(request) => resolution.requests.push(request),
+                Err(reason) => resolution.skipped.push(Skipped {
+                    path: path.clone(),
+                    reason,
+                }),
+            }
+        }
+        resolution
+    }
+
+    /// One job covering every file the pick suits.
+    ///
+    /// Files of another family are left out rather than forced in: merging a
+    /// video into a batch of photographs is not a thing, and saying so is more
+    /// useful than a command line that dies inside the engine.
+    fn combine(
+        &self,
+        registry: &Registry,
+        statuses: &BTreeMap<String, EngineStatus>,
+        available: &BTreeSet<String>,
+        pick: &Pick,
+        sources: &[PathBuf],
+    ) -> Resolution {
+        let mut resolution = Resolution::default();
+        let mut usable: Vec<(PathBuf, Kind)> = Vec::new();
+        for path in sources {
+            let file = probe_file(registry, path);
+            match self.spec(registry, &file, &pick.defaults) {
+                Ok(_) => usable.push((path.clone(), file.probe.kind)),
+                Err(reason) => resolution.skipped.push(Skipped {
+                    path: path.clone(),
+                    reason,
+                }),
+            }
+        }
+
+        let Some(kind) = usable.first().map(|(_, kind)| *kind) else {
+            return resolution;
+        };
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for (path, file_kind) in usable {
+            if file_kind == kind {
+                paths.push(path);
+            } else {
+                resolution.skipped.push(Skipped {
+                    path,
+                    reason: format!(
+                        "one {} can only combine {} files",
+                        action_label(self),
+                        family(kind)
+                    ),
+                });
+            }
+        }
+        order_sources(
+            &mut paths,
+            option_text(&pick.defaults, MERGE_ORDER).as_deref(),
+        );
+
+        let wanted = self.minimum().unwrap_or(2);
+        if paths.len() < wanted {
+            if let Some(path) = paths.into_iter().next() {
+                resolution.skipped.push(Skipped {
+                    path,
+                    reason: format!("{} needs at least {wanted} files", action_label(self)),
+                });
+            }
+            return resolution;
+        }
+
+        let file = probe_file(registry, &paths[0]);
+        let assembled = self
+            .spec(registry, &file, &pick.defaults)
+            .and_then(|spec| assemble(registry, statuses, available, &spec, paths, pick));
+        match assembled {
+            Ok(request) => resolution.requests.push(request),
+            Err(reason) => {
+                // Every file was share of the same failure: report the first so
+                // the hub has something to say, and leave the rest alone.
+                resolution
+                    .skipped
+                    .extend(sources.iter().map(|path| Skipped {
+                        path: path.clone(),
+                        reason: reason.clone(),
+                    }));
+            }
+        }
+        resolution
+    }
+
+    /// How many files the action needs before it can run at all.
+    fn minimum(&self) -> Option<usize> {
+        match self {
+            Self::Edit { action, .. } => Some(action.requires_files as usize),
+            Self::Convert { .. } => None,
+        }
+    }
+
     /// Work out what this file would need.
     ///
     /// The `Err` string is a reason to leave *this* file alone; the pick may
     /// still be right for the others in the batch.
-    fn spec<'a>(&'a self, registry: &'a Registry, file: &SourceFile) -> Result<Spec<'a>, String> {
+    fn spec<'a>(
+        &'a self,
+        registry: &'a Registry,
+        file: &SourceFile,
+        options: &Options,
+    ) -> Result<Spec<'a>, String> {
         let probe = &file.probe;
         match self {
             Self::Convert { target, ext, tag } => {
@@ -263,6 +414,7 @@ impl Intent {
                     candidates: rule.engines.clone(),
                     requires: rule.requires.clone(),
                     target: registry.format(target),
+                    probe: probe.clone(),
                 })
             }
             Self::Edit { action, ext } => {
@@ -274,11 +426,14 @@ impl Intent {
                     ));
                 }
                 let target_ext = match ext {
-                    Some(concrete) => concrete.clone(),
-                    None if probe.ext.is_empty() => {
+                    ExtRule::Fixed(concrete) => concrete.clone(),
+                    ExtRule::Merge => {
+                        merge_target(probe.kind, option_text(options, MERGE_OUTPUT).as_deref())
+                    }
+                    ExtRule::Keep if probe.ext.is_empty() => {
                         return Err(format!("{} has no extension to keep", describe(probe)));
                     }
-                    None => probe.ext.clone(),
+                    ExtRule::Keep => probe.ext.clone(),
                 };
                 Ok(Spec {
                     action: action.id.clone(),
@@ -289,57 +444,121 @@ impl Intent {
                     // Actions keep their input's format, so there is no target
                     // format to check writers against — the ring does the same.
                     target: None,
+                    probe: probe.clone(),
                 })
             }
         }
     }
+}
 
-    /// Build the request for one file, or say why it does not apply.
-    fn request(
-        &self,
-        registry: &Registry,
-        statuses: &BTreeMap<String, EngineStatus>,
-        available: &BTreeSet<String>,
-        pick: &Pick,
-        path: &Path,
-        file: &SourceFile,
-    ) -> Result<JobRequest, String> {
-        let probe = &file.probe;
-        let spec = self.spec(registry, file)?;
+/// Pick the engine for a spec and build the request.
+///
+/// One place for both shapes of job, so a merged request is filtered and
+/// reported exactly like a single-file one.
+fn assemble(
+    registry: &Registry,
+    statuses: &BTreeMap<String, EngineStatus>,
+    available: &BTreeSet<String>,
+    spec: &Spec<'_>,
+    sources: Vec<PathBuf>,
+    pick: &Pick,
+) -> Result<JobRequest, String> {
+    let choice = registry.choose_engine(
+        &spec.candidates,
+        &spec.requires,
+        &spec.probe,
+        spec.target,
+        available,
+    );
+    let Some(engine) = choice.chosen else {
+        return Err(match choice.missing {
+            Some(missing) => format!("needs {missing}, which is not installed"),
+            None => format!(
+                "no installed engine can do that to {}",
+                describe(&spec.probe)
+            ),
+        });
+    };
+    // Engines with no binary are compiled into Orbit.
+    let program = statuses
+        .get(&engine)
+        .and_then(|status| status.binary.clone())
+        .unwrap_or_else(|| PathBuf::from(&engine));
 
-        let choice = registry.choose_engine(
-            &spec.candidates,
-            &spec.requires,
-            probe,
-            spec.target,
-            available,
-        );
-        let Some(engine) = choice.chosen else {
-            return Err(match choice.missing {
-                Some(missing) => format!("needs {missing}, which is not installed"),
-                None => format!("no installed engine can do that to {}", describe(probe)),
-            });
-        };
-        // Engines with no binary are compiled into Orbit; the ones this
-        // milestone can drive all have one.
-        let Some(program) = statuses
-            .get(&engine)
-            .and_then(|status| status.binary.clone())
-        else {
-            return Err(format!("{engine} cannot be run here yet"));
-        };
+    Ok(JobRequest {
+        engine,
+        program,
+        kind: spec.probe.kind,
+        action: spec.action.clone(),
+        target_ext: spec.target_ext.clone(),
+        tag: spec.tag.clone(),
+        sources,
+        options: pick.defaults.clone(),
+        output_dir: None,
+    })
+}
 
-        Ok(JobRequest {
-            engine,
-            program,
-            kind: probe.kind,
-            action: spec.action,
-            target_ext: spec.target_ext,
-            tag: spec.tag,
-            sources: vec![path.to_path_buf()],
-            options: pick.defaults.clone(),
-            output_dir: None,
-        })
+/// What a merge produces, given the family of its inputs and the output chosen.
+///
+/// The option's registry default is a PDF, which means nothing for a batch of
+/// audio files. An output that cannot apply to the family therefore falls back
+/// to that family's own default instead of failing the run: the panel offers
+/// every value for every family, because the registry has one option catalog.
+fn merge_target(kind: Kind, chosen: Option<&str>) -> String {
+    let ext = match kind {
+        Kind::Video => "mp4",
+        Kind::Audio => "mp3",
+        // A GIF is a still-image slideshow: the only other result a batch of
+        // images can sensibly become.
+        Kind::Image if chosen == Some("gif") => "gif",
+        Kind::Image | Kind::Pdf | Kind::Text | Kind::Data | Kind::Document | Kind::Other => "pdf",
+    };
+    ext.to_owned()
+}
+
+/// Sort a merge's inputs the way the option asks.
+///
+/// The order is the one thing about a merge the user cannot see coming, so
+/// "as dragged" is the default and the other two are explicit.
+fn order_sources(paths: &mut [PathBuf], order: Option<&str>) {
+    match order {
+        Some("name") => paths.sort_by(|a, b| a.file_name().cmp(&b.file_name())),
+        Some("date") => paths.sort_by_key(|path| {
+            std::fs::metadata(path)
+                .and_then(|meta| meta.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+        }),
+        _ => {}
+    }
+}
+
+/// Read an option that holds text.
+fn option_text(options: &Options, key: &str) -> Option<String> {
+    match options.get(key)? {
+        Value::String(text) => Some(text.clone()),
+        _ => None,
+    }
+}
+
+/// The name of the action a pick refers to, for a message.
+fn action_label(intent: &Intent) -> String {
+    match intent {
+        Intent::Edit { action, .. } => action.label.clone(),
+        Intent::Convert { .. } => "convert".to_owned(),
+    }
+}
+
+/// A family, for "one PDF can only combine PDF files".
+fn family(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Image => "image",
+        Kind::Video => "video",
+        Kind::Audio => "audio",
+        Kind::Pdf => "PDF",
+        Kind::Text => "text",
+        Kind::Data => "data",
+        Kind::Document => "document",
+        Kind::Other => "recognised",
     }
 }
 

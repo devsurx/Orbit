@@ -5,7 +5,7 @@
     "kind": "conversion",
     "from": { "kind": "image", "not": { "format": "svg" } },
     "to": "@writable:image",
-    "engines": ["vips", "magick"],
+    "engines": ["vips", "magick", "orbit-native"],
     "requires": [],
     "defaults": { "quality": 82 },
     "options": ["quality", "resize_mode", "percent", "max_dim", "resize_preset", "strip_metadata", "background"],
@@ -48,7 +48,7 @@
     "defaults": { "page": "a4", "margin": "0cm", "orientation": "auto", "quality": 85 },
     "options": ["page", "margin", "orientation", "quality"],
     "rank": 45,
-    "note": "Several images dragged together become one multi-page PDF, in drag order."
+    "note": "One image on one page, at the page size and margin chosen. Several images dragged together become one multi-page PDF instead, through Merge."
   },
   {
     "id": "pdf-to-image",
@@ -59,10 +59,10 @@
     "only": ["png", "jpg", "webp", "tiff", "avif"],
     "engines": ["poppler", "magick", "ghostscript"],
     "requires": ["op:pdf_render"],
-    "defaults": { "dpi": "150", "pages": "1-", "quality": 85 },
-    "options": ["dpi", "pages", "quality"],
+    "defaults": { "dpi": "150", "pdf_page": 1, "quality": 85 },
+    "options": ["dpi", "pdf_page", "quality"],
     "rank": 50,
-    "note": "One file per page, or one file per page range."
+    "note": "Renders one page as one image. Rendering a whole document as a series of images needs the series-output contract in M5; page lists and ranges are the extract-pages action's job."
   },
   {
     "id": "pdf-to-text",
@@ -135,9 +135,10 @@
     "to": "png",
     "engines": ["ffmpeg"],
     "requires": ["op:extract_frames"],
-    "defaults": { "time": 1, "count": 1 },
-    "options": ["time", "count", "scale"],
-    "rank": 28
+    "defaults": { "time": 1 },
+    "options": ["time", "scale"],
+    "rank": 28,
+    "note": "One still, from the moment chosen. A run of frames is a series of files, which needs the series-output contract in M5."
   },
   {
     "id": "video-to-frame-jpg",
@@ -147,9 +148,10 @@
     "to": "jpg",
     "engines": ["ffmpeg"],
     "requires": ["op:extract_frames"],
-    "defaults": { "time": 1, "count": 1, "quality": 90 },
-    "options": ["time", "count", "scale", "quality"],
-    "rank": 20
+    "defaults": { "time": 1, "quality": 90 },
+    "options": ["time", "scale", "quality"],
+    "rank": 20,
+    "note": "One still, from the moment chosen; the PNG version explains why a count is not offered yet."
   },
   {
     "id": "audio-to-audio",
@@ -280,6 +282,6 @@
     "defaults": { "delimiter": ",", "header": true, "sheet": "1" },
     "options": ["delimiter", "header", "sheet"],
     "rank": 25,
-    "note": "CSV, JSON and YAML are converted in-process; spreadsheets go through LibreOffice."
+    "note": "CSV, TSV and JSON are converted in-process by the built-in engine; YAML and spreadsheets go through Pandoc and LibreOffice."
   }
 ]
