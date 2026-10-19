@@ -44,6 +44,10 @@ target are already here.</sub>
 
 ## 🚀 Quick start
 
+Grab an installer from [Releases](https://github.com/devsurx/Orbit/releases) —
+`.exe` or `.msi` on Windows, `.dmg` on macOS, `.AppImage`/`.deb`/`.rpm` on Linux —
+or [build from source](#-build-from-source).
+
 ```bash
 orbit ~/Pictures/photo.png    # the ring opens under your cursor
 ```
@@ -53,7 +57,7 @@ Pick a petal — *Convert → WebP*, *Compress*, *Trim* — and the result lands
 nothing is uploaded, and `orbit --log` prints the path of every file Orbit has
 written.
 
-<sub>First time here? → [Build from source](#-build-from-source) · [The `orbit` command](#-the-orbit-command)</sub>
+<sub>First time here? → [Build from source](#-build-from-source) · [The `orbit` command](#-the-orbit-command) · [Windows](#-windows)</sub>
 
 ---
 
@@ -163,7 +167,49 @@ Use an absolute path if `orbit-app` is not on your `PATH`. Bound with a file
 argument it selects that file; bound bare it reopens the ring for the last
 selection.
 
-### 🪟 Known limitation: translucent windows on Linux
+### 🪟 Windows
+
+Two installers, both built by CI on a real Windows runner:
+
+| File | Install | Notes |
+|---|---|---|
+| **`Orbit_*_x64-setup.exe`** | Per-user, no administrator prompt | The one to pick. Installs under `%LOCALAPPDATA%\Orbit`, uninstalls from Apps & features. |
+| **`Orbit_*_x64_en-US.msi`** | WiX, for managed machines | Same app, for deployments that want an MSI. |
+
+**WebView2** is what draws the ring. Windows 11 has it; Windows 10 usually does
+(Edge installs it). If it is missing, the installer fetches the bootstrapper from
+Microsoft — the only network access Orbit or its installer ever performs, and it
+is the runtime, not the app.
+
+**Getting files to it.** The ring is a drop target, so once it is up you can drop
+files straight onto it. To hand it files from the shell instead, right-click →
+**Send to** → **Orbit**:
+
+```powershell
+# once, from a normal (non-elevated) PowerShell
+powershell -ExecutionPolicy Bypass -File scripts\windows\install-send-to.ps1
+```
+
+That creates a shortcut in your personal Send-to folder, so it works for *any*
+selection without registering a single file association. `-Uninstall` removes it.
+Orbit is a single instance, so a multi-file selection arrives as one drop even if
+Windows launches it once per file.
+
+```powershell
+# Any shell, including Explorer's address bar
+Orbit.exe C:\Users\you\Pictures\photo.png
+Orbit.exe --hotkey=off
+```
+
+> 🧪 **How far this has been verified.** The whole app **type-checks against
+> `x86_64-pc-windows-msvc`**, which is what catches a stray Unix-only call or a
+> missing `cfg` — CI runs that check on every push, from Linux. The installers
+> themselves are built by the `installers` job on `windows-latest`, so they come
+> out of the real toolchain rather than a cross-compile. What cannot be verified
+> outside Windows is *runtime* behaviour: the tray menu, the hotkey, and the ring
+> on your desktop. That is the honest state of it, and why M4 is next.
+
+### 🤫 Known limitation: translucent windows on Linux
 
 WebKitGTK cannot composite a transparent webview on Wayland — a
 `transparent: true` Tauri window is created but **never rendered**. Orbit handles
@@ -433,7 +479,36 @@ Orbit/
 │   ├── orbit-app/            # 🪟 Tauri shell: tray, hotkey, overlay, pool (M1–M3)
 │   └── orbit-cli/            # ⌨️  headless `orbit convert …`            (M5)
 ├── scripts/orbit             # ⌨️  `orbit [file …]` launcher + job log
+├── scripts/windows/          # 🪟  "Send to → Orbit" installer
+├── .github/workflows/        # 📦  CI on every push, installers on every tag
 └── src/                      # ⚛️  React + Vite + Tailwind radial UI      (M1–M3)
+```
+
+## 📦 Building installers
+
+```bash
+npm ci
+npm run tauri build     # installers for *this* system, in target/release/bundle/
+```
+
+Cross-compiling is not the path: bundling uses WiX and NSIS on Windows,
+`hdiutil` on macOS, and `dpkg`/`rpmbuild`/`linuxdeploy` on Linux, so each
+installer is built on its own machine. What you *can* do from anywhere is the
+check that catches most platform breakage — the whole app, against the Windows
+target:
+
+```bash
+rustup target add x86_64-pc-windows-msvc
+cargo check -p orbit-app --target x86_64-pc-windows-msvc --features custom-protocol
+```
+
+| Workflow | Runs | Does |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | every push and pull request | format, clippy and the test suite against real engines on Linux; the Windows-target check above; and, on `main`, installers for all three platforms as downloadable artifacts. |
+| [`release.yml`](.github/workflows/release.yml) | a `v*` tag, or manually | builds the installers on all three platforms and files them under a **draft** release, so the notes can be read before anything ships. |
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 ## 🗺️ Roadmap
@@ -443,9 +518,16 @@ Orbit/
 | **M1** | Tray app, global hotkey, transparent overlay, radial menu UI | ✅ shipped |
 | **M2** | Job runner, worker pool, image & audio conversion | ✅ shipped |
 | **M3** | Options panel, PDF/document/OCR engines, merging, native engine, choosable hotkey | ✅ shipped |
-| **M4** | Windows/macOS shell integration: installers, CI, "Open with Orbit" | 🚧 next |
+| **M4a** | **Windows**: installers, CI, Send to, Windows-target verification | 🚚 shipping |
+| **M4b** | Per-OS Shift-drag trigger and shell integration (Windows · macOS · X11) | ⏳ next |
 | **M5** | Series output (page/frame runs), presets, history, watch folders, CLI | ⏳ planned |
 | **M6** | Onboarding, settings surface, polish | ⏳ planned |
+
+Windows ships *before* the Shift-drag trigger on purpose: the trigger is a small
+per-OS piece of input plumbing, while everything behind it — the registry, the
+engines, the options panel, the worker pool — is the same code everywhere.
+Shipping the installers first leaves one feature of Windows-specific work rather
+than a port.
 
 ## 🔒 Privacy
 
@@ -464,9 +546,17 @@ cargo run -p orbit-registry --example menu -- <your-ext>
 ```
 
 Adding a format or rule keeps `readers`/`writers` honest or the loader will tell
-you exactly what is wrong. A `CONTRIBUTING.md` and a `THIRD_PARTY_LICENSES.md`
-arrive with the packaging milestone.
+you exactly what is wrong. The full guide — adding an engine, an action, an
+option, the code invariants and the checks CI runs — is in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Bug reports and engine requests are just as welcome as pull requests. If a
+conversion you expect is missing, the fastest fix is often a few lines of JSON,
+and the issue will tell you which file.
 
 ## 📄 License
 
 [Mozilla Public License 2.0](LICENSE) © surx.
+
+Third-party components and the engines Orbit drives are listed, with their
+licences, in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).

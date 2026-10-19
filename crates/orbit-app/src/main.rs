@@ -718,8 +718,27 @@ fn main() {
                 let paths = selection_from_args(argv.into_iter().skip(1));
                 if !paths.is_empty() {
                     eprintln!("orbit: compositor binding carried {} path(s)", paths.len());
+
+                    // Windows' "Send to" can invoke Orbit once per selected file
+                    // rather than once for the lot. While the ring is still open
+                    // those arrivals are one selection, not the last of many — so
+                    // they accumulate. A request that arrives while the ring is
+                    // closed is a new selection, and replaces the old one.
+                    let open = app
+                        .get_webview_window(RING)
+                        .and_then(|window| window.is_visible().ok())
+                        .unwrap_or(false);
+
                     if let Ok(mut last) = orbit.last_drop.lock() {
-                        *last = paths;
+                        if open {
+                            for path in paths {
+                                if !last.contains(&path) {
+                                    last.push(path);
+                                }
+                            }
+                        } else {
+                            *last = paths;
+                        }
                     }
                 }
             }
