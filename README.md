@@ -396,7 +396,9 @@ window you go looking for. It stays on top until you dismiss it with
 ### ⌨️ The `orbit` command
 
 [`scripts/orbit`](scripts/orbit) is a small launcher that reduces all of that to
-one word:
+one word. The installers ship the GUI (`orbit-app`); the launcher and
+`orbit-cli` are repository tools, so build the CLI once with
+`cargo build --release -p orbit-cli` and link the launcher from the checkout:
 
 ```bash
 ln -s "$PWD/scripts/orbit" ~/.local/bin/orbit    # once, if ~/.local/bin is on PATH

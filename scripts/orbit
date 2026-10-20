@@ -16,7 +16,19 @@
 
 set -eu
 
-ROOT="${ORBIT_ROOT:-$HOME/orbit}"
+# Find the checkout this script lives in, following the symlink the README
+# suggests. A clone in any directory then works without setting ORBIT_ROOT.
+SELF=$0
+while [ -L "$SELF" ]; do
+    HERE=$(CDPATH= cd -P "$(dirname "$SELF")" && pwd)
+    SELF=$(readlink "$SELF")
+    case $SELF in
+    /*) ;;
+    *) SELF=$HERE/$SELF ;;
+    esac
+done
+HERE=$(CDPATH= cd -P "$(dirname "$SELF")" && pwd)
+ROOT="${ORBIT_ROOT:-$(dirname "$HERE")}"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}"
 LOG="$STATE/orbit/jobs.log"
 
