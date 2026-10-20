@@ -19,24 +19,43 @@
     "key": "compress_mode",
     "label": "How to compress",
     "type": "enum",
-    "values": ["quality", "target_size"],
+    "values": [
+      "quality",
+      "target_size"
+    ],
     "default": "quality",
-    "labels": { "quality": "Pick a quality", "target_size": "Hit a file size" }
+    "labels": {
+      "quality": "Pick a quality",
+      "target_size": "Hit a file size"
+    }
   },
   "target_size": {
     "key": "target_size",
     "label": "Target size",
     "type": "bytes",
     "default": 10485760,
-    "show_if": { "compress_mode": "target_size" },
-    "search": { "params": ["quality", "scale"], "max_attempts": 6 },
+    "show_if": {
+      "compress_mode": "target_size"
+    },
+    "search": {
+      "params": [
+        "quality",
+        "scale"
+      ],
+      "max_attempts": 6
+    },
     "help": "Orbit re-encodes a few times to land under this size."
   },
   "resize_mode": {
     "key": "resize_mode",
     "label": "Resize",
     "type": "enum",
-    "values": ["none", "percent", "max_dim", "preset"],
+    "values": [
+      "none",
+      "percent",
+      "max_dim",
+      "preset"
+    ],
     "default": "none"
   },
   "percent": {
@@ -47,7 +66,9 @@
     "max": 400,
     "default": 50,
     "unit": "%",
-    "show_if": { "resize_mode": "percent" }
+    "show_if": {
+      "resize_mode": "percent"
+    }
   },
   "max_dim": {
     "key": "max_dim",
@@ -57,13 +78,24 @@
     "max": 16384,
     "default": 1920,
     "unit": "px",
-    "show_if": { "resize_mode": "max_dim" }
+    "show_if": {
+      "resize_mode": "max_dim"
+    }
   },
   "resize_preset": {
     "key": "resize_preset",
     "label": "Preset",
     "type": "enum",
-    "values": ["4k", "1440p", "1080p", "720p", "480p", "square_1080", "story_1080x1920", "thumbnail"],
+    "values": [
+      "4k",
+      "1440p",
+      "1080p",
+      "720p",
+      "480p",
+      "square_1080",
+      "story_1080x1920",
+      "thumbnail"
+    ],
     "default": "1080p",
     "labels": {
       "4k": "4K (3840x2160)",
@@ -75,20 +107,37 @@
       "story_1080x1920": "Story (1080x1920)",
       "thumbnail": "Thumbnail (256px)"
     },
-    "show_if": { "resize_mode": "preset" }
+    "show_if": {
+      "resize_mode": "preset"
+    }
   },
   "resolution": {
     "key": "resolution",
     "label": "Resolution",
     "type": "enum",
-    "values": ["source", "4k", "1440p", "1080p", "720p", "480p", "360p"],
+    "values": [
+      "source",
+      "4k",
+      "1440p",
+      "1080p",
+      "720p",
+      "480p",
+      "360p"
+    ],
     "default": "source"
   },
   "codec": {
     "key": "codec",
     "label": "Codec",
     "type": "enum",
-    "values": ["h264", "h265", "vp9", "av1", "prores", "copy"],
+    "values": [
+      "h264",
+      "h265",
+      "vp9",
+      "av1",
+      "prores",
+      "copy"
+    ],
     "default": "h264",
     "help": "H.264 plays everywhere; H.265 and AV1 are smaller but slower."
   },
@@ -114,32 +163,61 @@
     "key": "audio_codec",
     "label": "Audio codec",
     "type": "enum",
-    "values": ["aac", "mp3", "opus", "vorbis", "flac", "pcm", "copy"],
+    "values": [
+      "aac",
+      "mp3",
+      "opus",
+      "vorbis",
+      "flac",
+      "pcm",
+      "copy"
+    ],
     "default": "aac"
   },
   "audio_bitrate": {
     "key": "audio_bitrate",
     "label": "Audio bitrate",
     "type": "enum",
-    "values": ["96000", "128000", "160000", "192000", "256000", "320000"],
+    "values": [
+      "96000",
+      "128000",
+      "160000",
+      "192000",
+      "256000",
+      "320000"
+    ],
     "default": "192000",
     "labels": {
-      "96000": "96 kbps", "128000": "128 kbps", "160000": "160 kbps",
-      "192000": "192 kbps", "256000": "256 kbps", "320000": "320 kbps"
+      "96000": "96 kbps",
+      "128000": "128 kbps",
+      "160000": "160 kbps",
+      "192000": "192 kbps",
+      "256000": "256 kbps",
+      "320000": "320 kbps"
     }
   },
   "sample_rate": {
     "key": "sample_rate",
     "label": "Sample rate",
     "type": "enum",
-    "values": ["source", "22050", "44100", "48000", "96000"],
+    "values": [
+      "source",
+      "22050",
+      "44100",
+      "48000",
+      "96000"
+    ],
     "default": "source"
   },
   "channels": {
     "key": "channels",
     "label": "Channels",
     "type": "enum",
-    "values": ["source", "mono", "stereo"],
+    "values": [
+      "source",
+      "mono",
+      "stereo"
+    ],
     "default": "source"
   },
   "normalize": {
@@ -170,7 +248,10 @@
     "key": "loop",
     "label": "Repeat",
     "type": "enum",
-    "values": ["forever", "once"],
+    "values": [
+      "forever",
+      "once"
+    ],
     "default": "forever"
   },
   "start": {
@@ -219,7 +300,12 @@
     "key": "dpi",
     "label": "Resolution",
     "type": "enum",
-    "values": ["72", "150", "300", "600"],
+    "values": [
+      "72",
+      "150",
+      "300",
+      "600"
+    ],
     "default": "150",
     "unit": "dpi"
   },
@@ -229,7 +315,7 @@
     "type": "text",
     "default": "1-",
     "placeholder": "1-3,7",
-    "help": "Ranges and single pages, for example 1-3,7."
+    "help": "Pages to render. A single page keeps the plain name; a range or 1- produces a numbered series."
   },
   "pdf_page": {
     "key": "pdf_page",
@@ -238,7 +324,7 @@
     "min": 1,
     "max": 5000,
     "default": 1,
-    "help": "Which page to render. Rendering a whole document as a series of images lands in M5."
+    "help": "Which single page to render. Leave Pages at a range to get one file per page."
   },
   "layout": {
     "key": "layout",
@@ -250,7 +336,13 @@
     "key": "page",
     "label": "Paper size",
     "type": "enum",
-    "values": ["a4", "a3", "letter", "legal", "source"],
+    "values": [
+      "a4",
+      "a3",
+      "letter",
+      "legal",
+      "source"
+    ],
     "default": "a4"
   },
   "margin": {
@@ -263,7 +355,11 @@
     "key": "orientation",
     "label": "Orientation",
     "type": "enum",
-    "values": ["auto", "portrait", "landscape"],
+    "values": [
+      "auto",
+      "portrait",
+      "landscape"
+    ],
     "default": "auto"
   },
   "toc": {
@@ -276,7 +372,12 @@
     "key": "delimiter",
     "label": "Delimiter",
     "type": "enum",
-    "values": [",", ";", "tab", "|"],
+    "values": [
+      ",",
+      ";",
+      "tab",
+      "|"
+    ],
     "default": ","
   },
   "header": {
@@ -310,9 +411,17 @@
     "key": "visualize_mode",
     "label": "Picture",
     "type": "enum",
-    "values": ["waveform", "spectrum", "cover"],
+    "values": [
+      "waveform",
+      "spectrum",
+      "cover"
+    ],
     "default": "waveform",
-    "labels": { "waveform": "Waveform", "spectrum": "Spectrum", "cover": "Cover art" }
+    "labels": {
+      "waveform": "Waveform",
+      "spectrum": "Spectrum",
+      "cover": "Cover art"
+    }
   },
   "strip_metadata": {
     "key": "strip_metadata",
@@ -325,7 +434,16 @@
     "key": "aspect",
     "label": "Aspect ratio",
     "type": "enum",
-    "values": ["free", "1:1", "4:3", "3:2", "16:9", "9:16", "3:4", "2:3"],
+    "values": [
+      "free",
+      "1:1",
+      "4:3",
+      "3:2",
+      "16:9",
+      "9:16",
+      "3:4",
+      "2:3"
+    ],
     "default": "free"
   },
   "region": {
@@ -339,52 +457,120 @@
     "key": "rotate",
     "label": "Rotate",
     "type": "enum",
-    "values": ["90", "180", "270"],
+    "values": [
+      "90",
+      "180",
+      "270"
+    ],
     "default": "90"
   },
   "flip_axis": {
     "key": "flip_axis",
     "label": "Axis",
     "type": "enum",
-    "values": ["horizontal", "vertical"],
+    "values": [
+      "horizontal",
+      "vertical"
+    ],
     "default": "horizontal"
   },
   "ocr_lang": {
     "key": "ocr_lang",
     "label": "Language",
     "type": "enum",
-    "values": ["auto", "eng", "deu", "fra", "spa", "ita", "por", "nld", "pol", "rus", "tur", "jpn", "chi_sim", "chi_tra", "kor", "ara", "hin"],
+    "values": [
+      "auto",
+      "eng",
+      "deu",
+      "fra",
+      "spa",
+      "ita",
+      "por",
+      "nld",
+      "pol",
+      "rus",
+      "tur",
+      "jpn",
+      "chi_sim",
+      "chi_tra",
+      "kor",
+      "ara",
+      "hin"
+    ],
     "default": "auto"
   },
   "ocr_output": {
     "key": "ocr_output",
     "label": "Output",
     "type": "enum",
-    "values": ["txt", "searchable_pdf"],
+    "values": [
+      "txt",
+      "searchable_pdf"
+    ],
     "default": "txt",
-    "labels": { "txt": "Plain text", "searchable_pdf": "Searchable PDF" }
+    "labels": {
+      "txt": "Plain text",
+      "searchable_pdf": "Searchable PDF"
+    }
   },
   "merge_output": {
     "key": "merge_output",
     "label": "Result",
     "type": "enum",
-    "values": ["pdf", "video", "audio", "gif"],
+    "values": [
+      "pdf",
+      "video",
+      "audio",
+      "gif"
+    ],
     "default": "pdf"
   },
   "merge_order": {
     "key": "merge_order",
     "label": "Order",
     "type": "enum",
-    "values": ["as_dragged", "name", "date"],
+    "values": [
+      "as_dragged",
+      "name",
+      "date"
+    ],
     "default": "as_dragged",
-    "labels": { "as_dragged": "As dragged", "name": "By name", "date": "Oldest first" }
+    "labels": {
+      "as_dragged": "As dragged",
+      "name": "By name",
+      "date": "Oldest first"
+    }
   },
   "pdf_compress_level": {
     "key": "pdf_compress_level",
     "label": "Effort",
     "type": "enum",
-    "values": ["lossless", "balanced", "aggressive"],
+    "values": [
+      "lossless",
+      "balanced",
+      "aggressive"
+    ],
     "default": "balanced",
     "help": "Lossless only tidies the PDF structure. Aggressive re-rasterises pages and needs Ghostscript."
+  },
+  "frame_step": {
+    "key": "frame_step",
+    "label": "Every",
+    "type": "number",
+    "min": 0.05,
+    "max": 3600,
+    "default": 1,
+    "unit": "s",
+    "help": "Seconds between frames."
+  },
+  "frame_limit": {
+    "key": "frame_limit",
+    "label": "At most",
+    "type": "int",
+    "min": 1,
+    "max": 10000,
+    "default": 100,
+    "unit": "frames",
+    "help": "Cap on the number of stills, so a long clip cannot fill the disk."
   }
 }

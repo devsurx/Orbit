@@ -12,7 +12,10 @@ import {
   onHotkey,
   onJob,
   onMenu,
+  onSettings,
+  openSettings,
   optionSpecs,
+  triggerStatus,
 } from "./lib/ipc";
 import type {
   DispatchAck,
@@ -21,6 +24,7 @@ import type {
   MenuModel,
   OptionSpec,
   Petal,
+  TriggerStatus,
 } from "./lib/types";
 
 interface DragState {
@@ -52,6 +56,7 @@ export default function App() {
   const [jobs, setJobs] = useState<Map<number, JobEvent>>(() => new Map());
   const [specs, setSpecs] = useState<Record<string, OptionSpec>>({});
   const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null);
+  const [trigger, setTrigger] = useState<TriggerStatus | null>(null);
   const [panel, setPanel] = useState<PanelState | null>(null);
 
   const files = useMemo(
@@ -67,19 +72,22 @@ export default function App() {
     let unlistenDrag: UnlistenFn | undefined;
     let unlistenJob: UnlistenFn | undefined;
     let unlistenHotkey: UnlistenFn | undefined;
+    let unlistenSettings: UnlistenFn | undefined;
     let cancelled = false;
 
     const boot = async () => {
       try {
-        const [initial, catalog, status] = await Promise.all([
+        const [initial, catalog, status, dragging] = await Promise.all([
           menuFor([]),
           optionSpecs(),
           hotkeyStatus(),
+          triggerStatus(),
         ]);
         if (!cancelled) {
           setModel(initial);
           setSpecs(catalog);
           setHotkey(status);
+          setTrigger(dragging);
         }
       } catch (cause) {
         if (!cancelled) {
@@ -118,6 +126,18 @@ export default function App() {
       });
 
       unlistenHotkey = await onHotkey(setHotkey);
+
+      unlistenSettings = await onSettings(() => {
+        // The trigger can be turned on or off in the settings window; the idle
+        // hint should not keep claiming a gesture that is switched off.
+        void triggerStatus()
+          .then((status) => {
+            if (!cancelled) {
+              setTrigger(status);
+            }
+          })
+          .catch(() => undefined);
+      });
     };
 
     void boot();
@@ -127,6 +147,7 @@ export default function App() {
       unlistenDrag?.();
       unlistenJob?.();
       unlistenHotkey?.();
+      unlistenSettings?.();
     };
   }, []);
 
@@ -249,7 +270,6 @@ export default function App() {
       <div
         className="relative"
         style={{ width: RING_SIZE, height: RING_SIZE }}
-        onClick={(event) => event.stopPropagation()}
         role="presentation"
       >
         {/* Backdrop: a glassy panel where the OS composites an alpha window
@@ -261,6 +281,22 @@ export default function App() {
             drag.active ? "ring-accent/70" : "ring-white/[0.07]",
           ].join(" ")}
         />
+
+        {/* The one affordance that is always there — except behind the
+            options panel, where it would cover the panel's own Esc. */}
+        {!panel && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void openSettings();
+            }}
+            className="pointer-events-auto absolute right-5 top-5 z-20 rounded-full bg-ink-800/80 px-3 py-2 text-[11px] text-white/50 ring-1 ring-white/10 transition-colors hover:bg-ink-700 hover:text-white/90"
+            title="Orbit settings, history and watch folders"
+          >
+            Settings
+          </button>
+        )}
 
         {model && !idle && progress.inFlight === 0 && !panel && (
           <RadialMenu
@@ -297,6 +333,7 @@ export default function App() {
             progress={progress}
             error={error}
             hotkey={hotkey}
+            trigger={trigger}
           />
         )}
       </div>
@@ -365,6 +402,11 @@ function summarise(jobs: Map<number, JobEvent>): Progress {
         done += 1;
         outputs.push(job.path);
         break;
+      case "done_series":
+        // One job, many files: a PDF split into pages, a video into frames.
+        done += 1;
+        outputs.push(...job.paths);
+        break;
       case "failed":
         failed += 1;
         firstError ??= job.message;
@@ -389,13 +431,13 @@ function summarise(jobs: Map<number, JobEvent>): Progress {
 
 /** Last path segment of a path, for naming a file or a folder. */
 function lastSegment(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : path;
 }
 
 /** The folder a published file landed in: "Pictures", not the full path. */
 function folderOf(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length > 1 ? parts[parts.length - 2] : "/";
 }
 
@@ -424,7 +466,8 @@ function progressLine(progress: Progress): string | null {
   }
   const folders = new Set(progress.outputs.map(folderOf));
   const where = folders.size === 1 ? ` in ${[...folders][0]}` : "";
-  return `${progress.done} files${where}`;
+  const count = progress.outputs.length > 0 ? progress.outputs.length : progress.done;
+  return `${count} files${where}`;
 }
 
 interface HubProps {
@@ -437,6 +480,7 @@ interface HubProps {
   progress: Progress;
   error: string | null;
   hotkey: HotkeyStatus | null;
+  trigger: TriggerStatus | null;
 }
 
 function Hub({
@@ -449,6 +493,7 @@ function Hub({
   progress,
   error,
   hotkey,
+  trigger,
 }: HubProps) {
   const busy = progress.inFlight > 0;
 
@@ -467,7 +512,7 @@ function Hub({
     : hoveredPetal
       ? hoveredPetal.disabled?.reason ?? hintFor(hoveredPetal)
       : idle
-        ? hotkeyHint(hotkey)
+        ? hotkeyHint(hotkey, trigger)
         : "Esc to cancel";
 
   return (
@@ -498,16 +543,31 @@ function summaryTitle(model: MenuModel | null): string {
 }
 
 /** What to say under the idle hub about the way in. */
-function hotkeyHint(hotkey: HotkeyStatus | null): string {
-  if (!hotkey) {
-    return "or use the tray icon";
+function hotkeyHint(
+  hotkey: HotkeyStatus | null,
+  trigger: TriggerStatus | null,
+): string {
+  const drag = trigger?.enabled && trigger.listening;
+  const key = !hotkey
+    ? null
+    : hotkey.registered
+      ? hotkey.label
+      : hotkey.accelerator
+        ? // Registered with the platform but not deliverable, which on Linux
+          // means Wayland; the README says why in full.
+          null
+        : null;
+
+  if (drag && key) {
+    return `Shift-drag a file, or press ${key}`;
   }
-  if (hotkey.registered) {
-    return `or press ${hotkey.label}`;
+  if (drag) {
+    return "Shift-drag a file here";
   }
-  if (hotkey.accelerator) {
-    // Registered with the platform but not deliverable, which on Linux means
-    // Wayland; the README says why in full.
+  if (key) {
+    return `or press ${key}`;
+  }
+  if (hotkey?.accelerator) {
     return "shortcut unavailable here — open from the tray";
   }
   return "open from the tray icon";

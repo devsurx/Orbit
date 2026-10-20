@@ -25,7 +25,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::native;
-use crate::plan::{AuxFile, Backend, CommandSpec, JobRequest, Plan, ProgressMode, plan};
+use crate::plan::{AuxFile, Backend, CommandSpec, JobRequest, ProgressMode, plan};
 
 /// How long a worker waits between cancellation checks while a child runs.
 const POLL: Duration = Duration::from_millis(80);
@@ -55,6 +55,11 @@ pub enum JobState {
     Done {
         /// Where the result was written.
         path: PathBuf,
+    },
+    /// Finished, publishing a numbered run (PDF pages, video frames).
+    DoneSeries {
+        /// Where every result was written, in order.
+        paths: Vec<PathBuf>,
     },
     /// Gave up. `message` is engine stderr or a planning error.
     Failed {
@@ -253,7 +258,10 @@ fn run_job(job: &Job, emit: &Emitter, cancels: &Cancels, closed: &AtomicBool) {
         emit,
         job,
         match outcome {
-            Ok(path) => JobState::Done { path },
+            Ok(paths) if paths.len() == 1 => JobState::Done {
+                path: paths.into_iter().next().unwrap_or_default(),
+            },
+            Ok(paths) => JobState::DoneSeries { paths },
             Err(Failure::Cancelled) => JobState::Cancelled,
             Err(
                 Failure::Plan(message)
@@ -274,8 +282,8 @@ fn report(emit: &Emitter, job: &Job, state: JobState) {
 }
 
 /// Run one job from plan to publish.
-fn execute(job: &Job, emit: &Emitter, cancel: &AtomicBool) -> Result<PathBuf, Failure> {
-    let planned = plan(&job.request).map_err(|error| Failure::Plan(error.to_string()))?;
+fn execute(job: &Job, emit: &Emitter, cancel: &AtomicBool) -> Result<Vec<PathBuf>, Failure> {
+    let mut planned = plan(&job.request).map_err(|error| Failure::Plan(error.to_string()))?;
 
     // The engine's side files — ffmpeg's concat list, LibreOffice's private
     // directory — are removed however this job ends, including cancellation.
@@ -283,37 +291,142 @@ fn execute(job: &Job, emit: &Emitter, cancel: &AtomicBool) -> Result<PathBuf, Fa
     sidecar
         .prepare()
         .map_err(|error| Failure::Io(error.to_string()))?;
+    // Intermediates of a chain are removed on every exit path, including an
+    // engine that fails halfway.
+    let _temps = TempFiles::new(planned.temps.clone());
 
-    let duration = match &planned.backend {
-        Backend::Process(spec) if spec.progress == ProgressMode::FfmpegKeyValue => {
-            spec.media_input.as_deref().and_then(probe_duration)
-        }
-        _ => None,
-    };
+    let duration = media_duration(&planned.backend);
 
     report(emit, job, JobState::Running { percent: None });
 
-    // The built-in engine is a function call, not a child process: it writes
-    // the same scratch file and reports the same failure words.
-    let status = match &planned.backend {
-        Backend::Native(op) => {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(Failure::Cancelled);
-            }
-            native::run(op, planned.output.scratch_path())
-                .map_err(|error| Failure::Native(error.to_string()))?;
-            Ok(())
-        }
-        Backend::Process(spec) => run_process(spec, emit, job, cancel, duration),
-    };
-    status?;
+    if let Err(error) = run_backend(
+        &planned.backend,
+        planned.output.scratch_path(),
+        emit,
+        job,
+        cancel,
+        duration,
+    ) {
+        sweep_series(planned.series.as_ref());
+        return Err(error);
+    }
 
-    collect(&planned)?;
+    if let Some(series) = &planned.series {
+        let produced = series_files(&series.prefix, &series.ext);
+        let published = planned
+            .output
+            .publish_series(&series.tag, &series.ext, &produced)
+            .map_err(|error| Failure::Io(error.to_string()))?;
+        // The published links are the result; the engine's own names go away.
+        for path in &produced {
+            let _ = fs::remove_file(path);
+        }
+        return Ok(published);
+    }
 
     planned
         .output
         .commit()
+        .map(|path| vec![path])
         .map_err(|error| Failure::Io(error.to_string()))
+}
+
+/// Run one backend, writing its result to `target`.
+fn run_backend(
+    backend: &Backend,
+    target: &Path,
+    emit: &Emitter,
+    job: &Job,
+    cancel: &AtomicBool,
+    duration: Option<f64>,
+) -> Result<(), Failure> {
+    match backend {
+        // The built-in engine is a function call, not a child process: it writes
+        // the same scratch file and reports the same failure words.
+        Backend::Native(op) => {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Failure::Cancelled);
+            }
+            native::run(op, target).map_err(|error| Failure::Native(error.to_string()))
+        }
+        Backend::Process(spec) => {
+            run_process(spec, emit, job, cancel, duration)?;
+            collect(spec, target)
+        }
+        Backend::Chain(steps) => {
+            for step in steps {
+                run_backend(&step.backend, &step.output, emit, job, cancel, duration)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// The first step of a chain that can report progress, if any.
+fn media_duration(backend: &Backend) -> Option<f64> {
+    match backend {
+        Backend::Process(spec) if spec.progress == ProgressMode::FfmpegKeyValue => {
+            spec.media_input.as_deref().and_then(probe_duration)
+        }
+        Backend::Process(_) | Backend::Native(_) => None,
+        Backend::Chain(steps) => steps.iter().find_map(|step| media_duration(&step.backend)),
+    }
+}
+
+/// Every file the engine wrote for a series, in numeric order.
+fn series_files(prefix: &Path, ext: &str) -> Vec<PathBuf> {
+    let (Some(dir), Some(base)) = (prefix.parent(), prefix.file_name()) else {
+        return Vec::new();
+    };
+    // A result beside a relative source has an empty parent, which `read_dir`
+    // rejects; it means the current directory.
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    let base = base.to_string_lossy();
+    let suffix = format!(".{}", ext.trim_start_matches('.'));
+    let mut found: Vec<(u64, PathBuf)> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let rest = name.strip_prefix(base.as_ref())?.strip_prefix('-')?;
+            let number = rest.strip_suffix(&suffix)?.parse::<u64>().ok()?;
+            Some((number, entry.path()))
+        })
+        .collect();
+    found.sort_by_key(|(number, _)| *number);
+    found.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Remove whatever a failed series left behind.
+fn sweep_series(series: Option<&crate::plan::SeriesPlan>) {
+    let Some(series) = series else {
+        return;
+    };
+    for path in series_files(&series.prefix, &series.ext) {
+        let _ = fs::remove_file(path);
+    }
+}
+
+/// Intermediate chain files, removed when the job ends.
+struct TempFiles(Vec<PathBuf>);
+
+impl TempFiles {
+    fn new(paths: Vec<PathBuf>) -> Self {
+        Self(paths)
+    }
+}
+
+impl Drop for TempFiles {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 /// Spawn the engine and wait for it, reporting progress and honouring cancels.
@@ -324,6 +437,15 @@ fn run_process(
     cancel: &AtomicBool,
     duration: Option<f64>,
 ) -> Result<(), Failure> {
+    if std::env::var_os("ORBIT_TRACE").is_some() {
+        eprintln!(
+            "orbit job {}: {} {:?}",
+            job.id,
+            spec.program.to_string_lossy(),
+            spec.args
+        );
+    }
+
     let mut child = Command::new(&spec.program)
         .args(&spec.args)
         .stdin(Stdio::null())
@@ -380,10 +502,7 @@ fn run_process(
 /// otherwise. Anything else — `pdftoppm`, `tesseract` — appends a known
 /// extension to a prefix the planner chose, so it already lands on the scratch
 /// path and this does nothing.
-fn collect(planned: &Plan) -> Result<(), Failure> {
-    let Backend::Process(spec) = &planned.backend else {
-        return Ok(());
-    };
+fn collect(spec: &CommandSpec, target: &Path) -> Result<(), Failure> {
     let Some(collected) = &spec.collected else {
         return Ok(());
     };
@@ -399,8 +518,7 @@ fn collect(planned: &Plan) -> Result<(), Failure> {
         })?
     };
 
-    fs::rename(&source, planned.output.scratch_path())
-        .map_err(|error| Failure::Io(error.to_string()))
+    fs::rename(&source, target).map_err(|error| Failure::Io(error.to_string()))
 }
 
 /// Side paths the engine needs that are not the result.
@@ -414,16 +532,10 @@ struct Sidecar {
 
 impl Sidecar {
     fn of(backend: &Backend) -> Self {
-        match backend {
-            Backend::Native(_) => Self {
-                dirs: Vec::new(),
-                aux: Vec::new(),
-            },
-            Backend::Process(spec) => Self {
-                dirs: spec.work_dirs.clone(),
-                aux: spec.aux_files.clone(),
-            },
-        }
+        let mut dirs = Vec::new();
+        let mut aux = Vec::new();
+        sidecar_parts(backend, &mut dirs, &mut aux);
+        Self { dirs, aux }
     }
 
     /// Create the work directories and write the auxiliary files.
@@ -455,6 +567,23 @@ impl Sidecar {
             .filter(|path| path.is_file());
         let first = candidates.next()?;
         candidates.next().is_none().then_some(first)
+    }
+}
+
+/// Gather every side file a backend tree needs, without constructing a
+/// [`Sidecar`] for each step (whose `Drop` would delete them immediately).
+fn sidecar_parts(backend: &Backend, dirs: &mut Vec<PathBuf>, aux: &mut Vec<AuxFile>) {
+    match backend {
+        Backend::Native(_) => {}
+        Backend::Process(spec) => {
+            dirs.extend(spec.work_dirs.iter().cloned());
+            aux.extend(spec.aux_files.iter().cloned());
+        }
+        Backend::Chain(steps) => {
+            for step in steps {
+                sidecar_parts(&step.backend, dirs, aux);
+            }
+        }
     }
 }
 
@@ -597,6 +726,7 @@ fn last_line(text: &str) -> Option<String> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::plan::StepRequest;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::time::Instant;
@@ -658,6 +788,7 @@ mod tests {
                     .into_iter()
                     .collect(),
                 output_dir: None,
+                steps: Vec::new(),
             },
         }
     }
@@ -876,5 +1007,156 @@ mod tests {
         }
         assert!(matches!(final_state(&events), JobState::Done { .. }));
         runner.shutdown();
+    }
+
+    /// A PDF-render job: `poppler`'s shape is a prefix the engine numbers.
+    fn series_job(id: JobId, script: &Path, source: &Path) -> Job {
+        Job {
+            id,
+            label: "Convert to PNG".to_owned(),
+            request: JobRequest {
+                engine: "poppler".to_owned(),
+                program: script.to_path_buf(),
+                kind: Kind::Pdf,
+                action: "convert".to_owned(),
+                target_ext: "png".to_owned(),
+                tag: "converted".to_owned(),
+                sources: vec![source.to_path_buf()],
+                options: json!({ "pages": "1-" })
+                    .as_object()
+                    .cloned()
+                    .unwrap()
+                    .into_iter()
+                    .collect(),
+                output_dir: None,
+                steps: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_series_is_published_as_a_numbered_run() {
+        let dir = TempDir::new("series-run");
+        let source = dir.path().join("scan.pdf");
+        fs::write(&source, b"%PDF").unwrap();
+        let script = fake_engine(
+            dir.path(),
+            "for last; do :; done\nprintf one > \"${last}-1.png\"\nprintf two > \"${last}-2.png\"",
+        );
+
+        let events = run_to_end(series_job(1, &script, &source));
+        match final_state(&events) {
+            JobState::DoneSeries { paths } => {
+                let names: Vec<_> = paths
+                    .iter()
+                    .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+                    .collect();
+                assert_eq!(
+                    names,
+                    ["scan (converted 001).png", "scan (converted 002).png"]
+                );
+                assert_eq!(fs::read(&paths[0]).unwrap(), b"one");
+                assert_eq!(fs::read(&paths[1]).unwrap(), b"two");
+            }
+            other => panic!("expected DoneSeries, got {other:?}"),
+        }
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".orbit-"))
+            .collect();
+        assert!(leftovers.is_empty(), "scratch series files are cleaned up");
+    }
+
+    #[test]
+    fn a_chain_runs_every_step_and_cleans_its_intermediates() {
+        let dir = TempDir::new("chain-run");
+        let source = dir.path().join("photo.png");
+        fs::write(&source, b"input").unwrap();
+        let counter = dir.path().join("counter");
+        let script = fake_engine(
+            dir.path(),
+            &format!(
+                "for last; do :; done\nn=$(cat {counter} 2>/dev/null || echo 0); \
+                 n=$((n+1)); echo $n > {counter}; printf \"step$n\" > \"$last\"",
+                counter = counter.display()
+            ),
+        );
+
+        let job = Job {
+            id: 3,
+            label: "Web ready".to_owned(),
+            request: JobRequest {
+                engine: "magick".to_owned(),
+                program: script,
+                kind: Kind::Image,
+                action: "chain".to_owned(),
+                target_ext: "webp".to_owned(),
+                tag: "web-ready".to_owned(),
+                sources: vec![source],
+                options: json!({})
+                    .as_object()
+                    .cloned()
+                    .unwrap()
+                    .into_iter()
+                    .collect(),
+                output_dir: None,
+                steps: vec![
+                    StepRequest {
+                        engine: "magick".to_owned(),
+                        program: PathBuf::from("unused"),
+                        kind: Kind::Image,
+                        action: "resize".to_owned(),
+                        target_ext: "png".to_owned(),
+                        tag: "resized".to_owned(),
+                        options: json!({})
+                            .as_object()
+                            .cloned()
+                            .unwrap()
+                            .into_iter()
+                            .collect(),
+                    },
+                    StepRequest {
+                        engine: "magick".to_owned(),
+                        program: PathBuf::from("unused"),
+                        kind: Kind::Image,
+                        action: "convert".to_owned(),
+                        target_ext: "webp".to_owned(),
+                        tag: "converted".to_owned(),
+                        options: json!({})
+                            .as_object()
+                            .cloned()
+                            .unwrap()
+                            .into_iter()
+                            .collect(),
+                    },
+                ],
+            },
+        };
+
+        // `plan_chain` builds each step from the request's own `program`, which
+        // it takes from the request, not from the step; make them match.
+        let mut job = job;
+        for step in &mut job.request.steps {
+            step.program = job.request.program.clone();
+        }
+
+        let events = run_to_end(job);
+        match final_state(&events) {
+            JobState::Done { path } => {
+                assert_eq!(path.file_name().unwrap(), "photo (web-ready).webp");
+                assert_eq!(fs::read(path).unwrap(), b"step2");
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+        assert_eq!(fs::read(&counter).unwrap(), b"2\n");
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".orbit-"))
+            .collect();
+        assert!(leftovers.is_empty(), "chain intermediates are removed");
     }
 }

@@ -28,6 +28,10 @@ const MAX_VARIANTS: u32 = 999;
 /// publish the result; dropping without committing cleans up the scratch file.
 #[derive(Debug)]
 pub struct OutputPlan {
+    /// The source's stem, kept so a *series* can name every file it publishes
+    /// (`photo (converted 001).png`) without re-deriving it from `final_path`,
+    /// where the tag has already been folded in.
+    stem: String,
     final_path: PathBuf,
     scratch_path: PathBuf,
     committed: bool,
@@ -74,6 +78,7 @@ impl OutputPlan {
 
         let scratch_path = create_scratch(&dir, &ext)?;
         Ok(Self {
+            stem,
             final_path,
             scratch_path,
             committed: false,
@@ -84,6 +89,18 @@ impl OutputPlan {
     #[must_use]
     pub fn final_path(&self) -> &Path {
         &self.final_path
+    }
+
+    /// The source's stem, for naming a series.
+    #[must_use]
+    pub fn stem(&self) -> &str {
+        &self.stem
+    }
+
+    /// The folder every result of this job belongs in.
+    #[must_use]
+    pub fn folder(&self) -> &Path {
+        self.final_path.parent().unwrap_or_else(|| Path::new("."))
     }
 
     /// The scratch path to hand to the engine, which may overwrite it freely.
@@ -104,6 +121,73 @@ impl OutputPlan {
         scratch_sibling(&self.scratch_path, label)
     }
 
+    /// Publish a run of files as `stem (tag 001).ext`, `stem (tag 002).ext`, …
+    ///
+    /// The whole run is reserved before anything is linked, so a collision
+    /// moves the batch to the next free block instead of leaving a half-numbered
+    /// set behind. Each publish is still a hard link, so a file that appears in
+    /// the meantime cannot be overwritten.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the engine produced nothing, when no free block of names can
+    /// be found, or when a link fails. Links already made are removed on
+    /// failure, so a failed series publishes either all of it or none.
+    pub fn publish_series(
+        &mut self,
+        tag: &str,
+        ext: &str,
+        produced: &[PathBuf],
+    ) -> io::Result<Vec<PathBuf>> {
+        if produced.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the engine wrote no files",
+            ));
+        }
+        let ext = ext.trim_start_matches('.').to_lowercase();
+        let count = u32::try_from(produced.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "too many files"))?;
+        let dir = self.folder().to_path_buf();
+
+        let start = (1..=MAX_VARIANTS)
+            .find(|start| {
+                (0..count).all(|offset| {
+                    start
+                        .checked_add(offset)
+                        .is_none_or(|index| index <= MAX_VARIANTS)
+                        && !dir
+                            .join(series_name(&self.stem, tag, start + offset, &ext))
+                            .exists()
+                })
+            })
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("every series name up to {MAX_VARIANTS} is taken"),
+                )
+            })?;
+
+        let mut published = Vec::with_capacity(produced.len());
+        for (offset, source) in produced.iter().enumerate() {
+            let index = start + u32::try_from(offset).unwrap_or(0);
+            let target = dir.join(series_name(&self.stem, tag, index, &ext));
+            if let Err(error) = link_or_rename(source, &target) {
+                for done in &published {
+                    let _ = fs::remove_file(done);
+                }
+                return Err(error);
+            }
+            published.push(target);
+        }
+
+        // The reserved single-file scratch was only ever a placeholder for the
+        // directory; the series never wrote to it.
+        let _ = fs::remove_file(&self.scratch_path);
+        self.committed = true;
+        Ok(published)
+    }
+
     /// Publish the engine's output under the reserved name.
     ///
     /// Uses a hard link so the publish cannot overwrite a file that appeared
@@ -118,23 +202,34 @@ impl OutputPlan {
     pub fn commit(mut self) -> io::Result<PathBuf> {
         // Publish first: if linking fails we still own the scratch file and the
         // `Drop` impl will clear it.
-        if let Err(link_error) = fs::hard_link(&self.scratch_path, &self.final_path) {
-            if link_error.kind() == io::ErrorKind::AlreadyExists {
-                return Err(link_error);
-            }
-            if self.final_path.exists() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!("{} already exists", self.final_path.display()),
-                ));
-            }
-            fs::rename(&self.scratch_path, &self.final_path)?;
-        }
+        link_or_rename(&self.scratch_path, &self.final_path)?;
         // The link is the result now; the scratch name goes away. Nothing to do
         // if this fails — the scratch file is a hidden duplicate, not a leak.
         let _ = fs::remove_file(&self.scratch_path);
         self.committed = true;
         Ok(self.final_path.clone())
+    }
+}
+
+/// Publish one file without ever replacing an existing one.
+///
+/// A hard link fails where a rename would replace, which closes the window
+/// between choosing a name and using it. Filesystems without links fall back to
+/// a rename after an explicit existence check; on Windows a rename is itself a
+/// no-clobber operation.
+fn link_or_rename(from: &Path, to: &Path) -> io::Result<()> {
+    match fs::hard_link(from, to) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(error),
+        Err(_) => {
+            if to.exists() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{} already exists", to.display()),
+                ));
+            }
+            fs::rename(from, to)
+        }
     }
 }
 
@@ -154,6 +249,12 @@ fn variant_name(stem: &str, tag: &str, ext: &str, variant: u32) -> String {
     } else {
         format!("{stem} ({tag} {variant}).{ext}")
     }
+}
+
+/// `"scan (converted 001).png"` — a series is numbered from one, always with
+/// three digits, so the order is obvious in a file manager and sorts as text.
+fn series_name(stem: &str, tag: &str, index: u32, ext: &str) -> String {
+    format!("{stem} ({tag} {index:03}).{ext}")
 }
 
 /// Also used by the planner, which has to name its side files before there is
@@ -340,6 +441,78 @@ mod tests {
     fn a_source_without_a_name_is_an_error() {
         let error = OutputPlan::reserve(Path::new("/"), "converted", "webp", None)
             .expect_err("no stem to build on");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn a_series_is_numbered_from_one_and_published_whole() {
+        let dir = TempDir::new("series");
+        let mut plan =
+            OutputPlan::reserve(&source(dir.path(), "scan.pdf"), "converted", "png", None).unwrap();
+        let scratch = plan.scratch_path().to_path_buf();
+        let inputs: Vec<PathBuf> = (1..=3)
+            .map(|n| {
+                let path = dir.path().join(format!("produced-{n}.png"));
+                fs::write(&path, format!("page {n}")).unwrap();
+                path
+            })
+            .collect();
+
+        let published = plan.publish_series("converted", "png", &inputs).unwrap();
+        let names: Vec<_> = published
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "scan (converted 001).png",
+                "scan (converted 002).png",
+                "scan (converted 003).png"
+            ]
+        );
+        assert_eq!(fs::read(&published[1]).unwrap(), b"page 2");
+        assert!(!scratch.exists(), "the placeholder scratch is released");
+    }
+
+    #[test]
+    fn a_series_moves_as_a_block_when_the_first_name_is_taken() {
+        let dir = TempDir::new("series-block");
+        let mut plan =
+            OutputPlan::reserve(&source(dir.path(), "scan.pdf"), "converted", "png", None).unwrap();
+        // Occupy the first slot; the whole run has to start at 002 so the
+        // numbering never interleaves with an older result.
+        fs::write(dir.path().join("scan (converted 001).png"), b"older").unwrap();
+        let inputs: Vec<PathBuf> = (1..=2)
+            .map(|n| {
+                let path = dir.path().join(format!("produced-block-{n}.png"));
+                fs::write(&path, b"new").unwrap();
+                path
+            })
+            .collect();
+
+        let published = plan.publish_series("converted", "png", &inputs).unwrap();
+        assert_eq!(
+            published
+                .iter()
+                .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            ["scan (converted 002).png", "scan (converted 003).png"]
+        );
+        assert_eq!(
+            fs::read(dir.path().join("scan (converted 001).png")).unwrap(),
+            b"older"
+        );
+    }
+
+    #[test]
+    fn an_empty_series_is_refused() {
+        let dir = TempDir::new("series-empty");
+        let mut plan =
+            OutputPlan::reserve(&source(dir.path(), "scan.pdf"), "converted", "png", None).unwrap();
+        let error = plan
+            .publish_series("converted", "png", &[])
+            .expect_err("nothing to publish");
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 }

@@ -6,7 +6,10 @@
     "icon": "arrows-shuffle",
     "applies_to": [],
     "engines": {},
-    "options": ["to", "*"],
+    "options": [
+      "to",
+      "*"
+    ],
     "defaults": {},
     "rank": 100,
     "tag": "converted",
@@ -20,25 +23,61 @@
     "category": "compress",
     "icon": "compress",
     "applies_to": [
-      { "kind": "image" },
-      { "kind": "video" },
-      { "kind": "audio" },
-      { "format": "pdf" }
+      {
+        "kind": "image"
+      },
+      {
+        "kind": "video"
+      },
+      {
+        "kind": "audio"
+      },
+      {
+        "format": "pdf"
+      }
     ],
     "engines": {
-      "image": ["vips", "magick", "orbit-native"],
-      "video": ["ffmpeg"],
-      "audio": ["ffmpeg"],
-      "pdf": ["qpdf", "ghostscript"]
+      "image": [
+        "vips",
+        "magick",
+        "orbit-native"
+      ],
+      "video": [
+        "ffmpeg"
+      ],
+      "audio": [
+        "ffmpeg"
+      ],
+      "pdf": [
+        "qpdf",
+        "ghostscript"
+      ]
     },
     "requires": {
-      "image": ["op:compress"],
-      "video": ["op:compress"],
-      "audio": ["op:compress"],
-      "pdf": ["op:pdf_compress"]
+      "image": [
+        "op:compress"
+      ],
+      "video": [
+        "op:compress"
+      ],
+      "audio": [
+        "op:compress"
+      ],
+      "pdf": [
+        "op:pdf_compress"
+      ]
     },
-    "options": ["compress_mode", "quality", "target_size", "strip_metadata"],
-    "defaults": { "compress_mode": "quality", "quality": 78, "target_size": 10485760 },
+    "options": [
+      "compress_mode",
+      "quality",
+      "target_size",
+      "strip_metadata"
+    ],
+    "defaults": {
+      "compress_mode": "quality",
+      "quality": 78,
+      "target_size": 10485760
+    },
     "rank": 90,
     "tag": "compressed"
   },
@@ -48,25 +87,59 @@
     "category": "merge",
     "icon": "stack",
     "applies_to": [
-      { "format": "pdf" },
-      { "kind": "image" },
-      { "kind": "video" },
-      { "kind": "audio" }
+      {
+        "format": "pdf"
+      },
+      {
+        "kind": "image"
+      },
+      {
+        "kind": "video"
+      },
+      {
+        "kind": "audio"
+      }
     ],
     "engines": {
-      "pdf": ["qpdf", "ghostscript", "magick"],
-      "image": ["magick", "orbit-native"],
-      "video": ["ffmpeg"],
-      "audio": ["ffmpeg"]
+      "pdf": [
+        "qpdf",
+        "ghostscript",
+        "magick"
+      ],
+      "image": [
+        "magick",
+        "orbit-native"
+      ],
+      "video": [
+        "ffmpeg"
+      ],
+      "audio": [
+        "ffmpeg"
+      ]
     },
     "requires": {
-      "pdf": ["op:pdf_merge"],
-      "image": ["op:image_layout"],
-      "video": ["op:concat"],
-      "audio": ["op:concat"]
+      "pdf": [
+        "op:pdf_merge"
+      ],
+      "image": [
+        "op:image_layout"
+      ],
+      "video": [
+        "op:concat"
+      ],
+      "audio": [
+        "op:concat"
+      ]
     },
-    "options": ["merge_output", "merge_order", "quality"],
-    "defaults": { "merge_output": "pdf", "merge_order": "as_dragged" },
+    "options": [
+      "merge_output",
+      "merge_order",
+      "quality"
+    ],
+    "defaults": {
+      "merge_output": "pdf",
+      "merge_order": "as_dragged"
+    },
     "requires_files": 2,
     "combines": true,
     "rank": 85,
@@ -79,11 +152,38 @@
     "label": "Trim",
     "category": "trim",
     "icon": "scissors",
-    "applies_to": [{ "kind": "video" }, { "kind": "audio" }],
-    "engines": { "video": ["ffmpeg"], "audio": ["ffmpeg"] },
-    "requires": { "video": ["op:trim"], "audio": ["op:trim"] },
-    "options": ["start", "end"],
-    "defaults": { "start": 0, "end": null },
+    "applies_to": [
+      {
+        "kind": "video"
+      },
+      {
+        "kind": "audio"
+      }
+    ],
+    "engines": {
+      "video": [
+        "ffmpeg"
+      ],
+      "audio": [
+        "ffmpeg"
+      ]
+    },
+    "requires": {
+      "video": [
+        "op:trim"
+      ],
+      "audio": [
+        "op:trim"
+      ]
+    },
+    "options": [
+      "start",
+      "end"
+    ],
+    "defaults": {
+      "start": 0,
+      "end": null
+    },
     "rank": 80,
     "tag": "trimmed",
     "note": "Opens a waveform or filmstrip so the section is picked visually, with times editable to the frame."
@@ -93,11 +193,31 @@
     "label": "Audio from video",
     "category": "extract",
     "icon": "music",
-    "applies_to": [{ "kind": "video" }],
-    "engines": { "video": ["ffmpeg"] },
-    "requires": { "video": ["op:extract_audio"] },
-    "options": ["audio_bitrate", "sample_rate", "channels", "normalize"],
-    "defaults": { "audio_bitrate": "192000", "normalize": false },
+    "applies_to": [
+      {
+        "kind": "video"
+      }
+    ],
+    "engines": {
+      "video": [
+        "ffmpeg"
+      ]
+    },
+    "requires": {
+      "video": [
+        "op:extract_audio"
+      ]
+    },
+    "options": [
+      "audio_bitrate",
+      "sample_rate",
+      "channels",
+      "normalize"
+    ],
+    "defaults": {
+      "audio_bitrate": "192000",
+      "normalize": false
+    },
     "rank": 70,
     "tag": "audio",
     "output_ext": "mp3"
@@ -107,11 +227,28 @@
     "label": "Pages from PDF",
     "category": "extract",
     "icon": "file-text",
-    "applies_to": [{ "format": "pdf" }],
-    "engines": { "pdf": ["qpdf", "poppler"] },
-    "requires": { "pdf": ["op:pdf_split"] },
-    "options": ["pages"],
-    "defaults": { "pages": "1" },
+    "applies_to": [
+      {
+        "format": "pdf"
+      }
+    ],
+    "engines": {
+      "pdf": [
+        "qpdf",
+        "poppler"
+      ]
+    },
+    "requires": {
+      "pdf": [
+        "op:pdf_split"
+      ]
+    },
+    "options": [
+      "pages"
+    ],
+    "defaults": {
+      "pages": "1"
+    },
     "rank": 60,
     "tag": "pages",
     "output_ext": "pdf",
@@ -122,26 +259,79 @@
     "label": "Frames from video",
     "category": "extract",
     "icon": "film",
-    "applies_to": [{ "kind": "video" }],
-    "engines": { "video": ["ffmpeg"] },
-    "requires": { "video": ["op:extract_frames"] },
-    "options": ["time", "scale"],
-    "defaults": { "time": 1 },
+    "applies_to": [
+      {
+        "kind": "video"
+      }
+    ],
+    "engines": {
+      "video": [
+        "ffmpeg"
+      ]
+    },
+    "requires": {
+      "video": [
+        "op:extract_frames"
+      ]
+    },
+    "options": [
+      "time",
+      "frame_step",
+      "frame_limit",
+      "scale"
+    ],
+    "defaults": {
+      "time": 0,
+      "frame_step": 1,
+      "frame_limit": 100,
+      "scale": 1
+    },
     "rank": 55,
     "tag": "frame",
     "output_ext": "png",
-    "note": "One frame at a time, at the chosen timestamp. The time needs a frame-stepping picker before a count is worth offering."
+    "note": "One PNG per step (default every second), capped at 100. Change either in the options panel."
   },
   {
     "id": "resize",
     "label": "Resize",
     "category": "crop",
     "icon": "maximize",
-    "applies_to": [{ "kind": "image" }, { "kind": "video" }],
-    "engines": { "image": ["vips", "magick", "orbit-native"], "video": ["ffmpeg"] },
-    "requires": { "image": ["op:resize"], "video": ["op:resize"] },
-    "options": ["resize_mode", "percent", "max_dim", "resize_preset"],
-    "defaults": { "resize_mode": "max_dim", "max_dim": 1920 },
+    "applies_to": [
+      {
+        "kind": "image"
+      },
+      {
+        "kind": "video"
+      }
+    ],
+    "engines": {
+      "image": [
+        "vips",
+        "magick",
+        "orbit-native"
+      ],
+      "video": [
+        "ffmpeg"
+      ]
+    },
+    "requires": {
+      "image": [
+        "op:resize"
+      ],
+      "video": [
+        "op:resize"
+      ]
+    },
+    "options": [
+      "resize_mode",
+      "percent",
+      "max_dim",
+      "resize_preset"
+    ],
+    "defaults": {
+      "resize_mode": "max_dim",
+      "max_dim": 1920
+    },
     "rank": 60,
     "tag": "resized"
   },
@@ -150,11 +340,40 @@
     "label": "Crop",
     "category": "crop",
     "icon": "crop",
-    "applies_to": [{ "kind": "image" }, { "kind": "video" }],
-    "engines": { "image": ["vips", "magick", "orbit-native"], "video": ["ffmpeg"] },
-    "requires": { "image": ["op:crop"], "video": ["op:crop"] },
-    "options": ["region", "aspect"],
-    "defaults": { "region": null, "aspect": "free" },
+    "applies_to": [
+      {
+        "kind": "image"
+      },
+      {
+        "kind": "video"
+      }
+    ],
+    "engines": {
+      "image": [
+        "vips",
+        "magick",
+        "orbit-native"
+      ],
+      "video": [
+        "ffmpeg"
+      ]
+    },
+    "requires": {
+      "image": [
+        "op:crop"
+      ],
+      "video": [
+        "op:crop"
+      ]
+    },
+    "options": [
+      "region",
+      "aspect"
+    ],
+    "defaults": {
+      "region": null,
+      "aspect": "free"
+    },
     "rank": 50,
     "tag": "cropped",
     "note": "Opens a preview with a draggable box and aspect-ratio presets."
@@ -165,22 +384,48 @@
     "category": "more",
     "icon": "shield",
     "applies_to": [
-      { "kind": "image" },
-      { "kind": "video" },
-      { "kind": "audio" },
-      { "format": "pdf" }
+      {
+        "kind": "image"
+      },
+      {
+        "kind": "video"
+      },
+      {
+        "kind": "audio"
+      },
+      {
+        "format": "pdf"
+      }
     ],
     "engines": {
-      "image": ["vips", "magick", "orbit-native"],
-      "video": ["ffmpeg"],
-      "audio": ["ffmpeg"],
-      "pdf": ["qpdf"]
+      "image": [
+        "vips",
+        "magick",
+        "orbit-native"
+      ],
+      "video": [
+        "ffmpeg"
+      ],
+      "audio": [
+        "ffmpeg"
+      ],
+      "pdf": [
+        "qpdf"
+      ]
     },
     "requires": {
-      "image": ["op:strip_metadata"],
-      "video": ["op:strip_metadata"],
-      "audio": ["op:strip_metadata"],
-      "pdf": ["op:strip_metadata"]
+      "image": [
+        "op:strip_metadata"
+      ],
+      "video": [
+        "op:strip_metadata"
+      ],
+      "audio": [
+        "op:strip_metadata"
+      ],
+      "pdf": [
+        "op:strip_metadata"
+      ]
     },
     "options": [],
     "defaults": {},
@@ -193,11 +438,29 @@
     "label": "Read text (OCR)",
     "category": "more",
     "icon": "scan-text",
-    "applies_to": [{ "kind": "image" }],
-    "engines": { "image": ["tesseract"] },
-    "requires": { "image": ["op:ocr"] },
-    "options": ["ocr_lang", "ocr_output"],
-    "defaults": { "ocr_lang": "auto", "ocr_output": "txt" },
+    "applies_to": [
+      {
+        "kind": "image"
+      }
+    ],
+    "engines": {
+      "image": [
+        "tesseract"
+      ]
+    },
+    "requires": {
+      "image": [
+        "op:ocr"
+      ]
+    },
+    "options": [
+      "ocr_lang",
+      "ocr_output"
+    ],
+    "defaults": {
+      "ocr_lang": "auto",
+      "ocr_output": "txt"
+    },
     "rank": 30,
     "tag": "text",
     "output_ext": "txt",
@@ -208,15 +471,48 @@
     "label": "Rotate",
     "category": "more",
     "icon": "rotate",
-    "applies_to": [{ "kind": "image" }, { "kind": "video" }, { "format": "pdf" }],
+    "applies_to": [
+      {
+        "kind": "image"
+      },
+      {
+        "kind": "video"
+      },
+      {
+        "format": "pdf"
+      }
+    ],
     "engines": {
-      "image": ["vips", "magick", "orbit-native"],
-      "video": ["ffmpeg"],
-      "pdf": ["qpdf", "magick"]
+      "image": [
+        "vips",
+        "magick",
+        "orbit-native"
+      ],
+      "video": [
+        "ffmpeg"
+      ],
+      "pdf": [
+        "qpdf",
+        "magick"
+      ]
     },
-    "requires": { "image": ["op:rotate"], "video": ["op:rotate"], "pdf": ["op:pdf_rotate"] },
-    "options": ["rotate"],
-    "defaults": { "rotate": "90" },
+    "requires": {
+      "image": [
+        "op:rotate"
+      ],
+      "video": [
+        "op:rotate"
+      ],
+      "pdf": [
+        "op:pdf_rotate"
+      ]
+    },
+    "options": [
+      "rotate"
+    ],
+    "defaults": {
+      "rotate": "90"
+    },
     "rank": 20,
     "tag": "rotated"
   },
@@ -225,11 +521,38 @@
     "label": "Flip",
     "category": "more",
     "icon": "flip",
-    "applies_to": [{ "kind": "image" }, { "kind": "video" }],
-    "engines": { "image": ["vips", "magick", "orbit-native"], "video": ["ffmpeg"] },
-    "requires": { "image": ["op:flip"], "video": ["op:flip"] },
-    "options": ["flip_axis"],
-    "defaults": { "flip_axis": "horizontal" },
+    "applies_to": [
+      {
+        "kind": "image"
+      },
+      {
+        "kind": "video"
+      }
+    ],
+    "engines": {
+      "image": [
+        "vips",
+        "magick",
+        "orbit-native"
+      ],
+      "video": [
+        "ffmpeg"
+      ]
+    },
+    "requires": {
+      "image": [
+        "op:flip"
+      ],
+      "video": [
+        "op:flip"
+      ]
+    },
+    "options": [
+      "flip_axis"
+    ],
+    "defaults": {
+      "flip_axis": "horizontal"
+    },
     "rank": 15,
     "tag": "flipped"
   },
@@ -238,9 +561,32 @@
     "label": "Black and white",
     "category": "more",
     "icon": "contrast",
-    "applies_to": [{ "kind": "image" }, { "kind": "video" }],
-    "engines": { "image": ["vips", "magick", "orbit-native"], "video": ["ffmpeg"] },
-    "requires": { "image": ["op:grayscale"], "video": ["op:grayscale"] },
+    "applies_to": [
+      {
+        "kind": "image"
+      },
+      {
+        "kind": "video"
+      }
+    ],
+    "engines": {
+      "image": [
+        "vips",
+        "magick",
+        "orbit-native"
+      ],
+      "video": [
+        "ffmpeg"
+      ]
+    },
+    "requires": {
+      "image": [
+        "op:grayscale"
+      ],
+      "video": [
+        "op:grayscale"
+      ]
+    },
     "options": [],
     "defaults": {},
     "rank": 10,

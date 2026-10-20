@@ -1,8 +1,9 @@
 //! The small amount of state Orbit remembers between runs.
 //!
-//! Today that is one thing: the global shortcut. It lives in a plain JSON file
-//! beside the app's other configuration, because the alternative — a shortcut
-//! that resets on every launch, or one that can only be changed by editing a
+//! That is the shortcut, the Shift-drag switch, the output folder, the watch
+//! rules and whether the welcome has been shown. It lives in a plain JSON file
+//! beside the app's other configuration, because the alternative — settings
+//! that reset on every launch, or ones that can only be changed by editing a
 //! source file — is exactly the sort of thing that makes a background utility
 //! annoying enough to uninstall.
 //!
@@ -10,10 +11,12 @@
 //! must not leave a half-written settings file behind, or the next launch would
 //! silently fall back to the default with no way to tell why.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// The shortcut registered on a fresh install.
 pub const DEFAULT_HOTKEY: &str = "CmdOrCtrl+Shift+Space";
@@ -58,6 +61,23 @@ impl HotkeyStatus {
     }
 }
 
+/// One folder Orbit watches, and what to do with files that appear in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatchFolder {
+    /// Folder to scan.
+    pub path: PathBuf,
+    /// `conversion`, `action` or `preset`.
+    pub kind: String,
+    /// Format id, action id or chain id.
+    pub reference: String,
+    /// Option values applied to every file found here.
+    #[serde(default)]
+    pub options: BTreeMap<String, Value>,
+    /// Whether the rule runs; the folder stays listed when it is paused.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
 /// The persisted settings document.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -68,6 +88,18 @@ pub struct Settings {
     /// in the file rather than collapsed into one.
     #[serde(default = "default_hotkey")]
     pub hotkey: Option<String>,
+    /// Folder every result goes to, or `None` for "beside the source".
+    #[serde(default)]
+    pub output_dir: Option<PathBuf>,
+    /// Whether Shift-drag summons the ring.
+    #[serde(default = "default_true")]
+    pub trigger: bool,
+    /// False until the first-run window has been dismissed.
+    #[serde(default)]
+    pub onboarded: bool,
+    /// Folders watched for new files.
+    #[serde(default)]
+    pub watch: Vec<WatchFolder>,
 }
 
 // The signature is fixed at the field's type, which `Option`-wraps the value so
@@ -77,10 +109,18 @@ fn default_hotkey() -> Option<String> {
     Some(DEFAULT_HOTKEY.to_owned())
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             hotkey: default_hotkey(),
+            output_dir: None,
+            trigger: true,
+            onboarded: false,
+            watch: Vec::new(),
         }
     }
 }
@@ -121,8 +161,21 @@ impl Settings {
             .map_err(|error| std::io::Error::other(error.to_string()))?;
         let temporary = path.with_extension("json.new");
         fs::write(&temporary, format!("{text}\n"))?;
-        fs::rename(&temporary, path)
+        replace_file(&temporary, path)
     }
+}
+
+/// Replace `to` with `from`.
+///
+/// Unix renames over an existing file. Windows refuses to, so the destination
+/// is removed first; the crash window that opens is a Windows-only trade for
+/// not depending on a platform API just to save a few preferences.
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    if to.exists() {
+        fs::remove_file(to)?;
+    }
+    fs::rename(from, to)
 }
 
 /// The label for an accelerator, in the words the presets use.
@@ -166,6 +219,7 @@ mod tests {
         let path = settings_path(&dir);
         let settings = Settings {
             hotkey: Some("Ctrl+Alt+O".to_owned()),
+            ..Settings::default()
         };
         settings.save(&path).unwrap();
         assert_eq!(Settings::load(&path).hotkey.as_deref(), Some("Ctrl+Alt+O"));
@@ -176,7 +230,12 @@ mod tests {
     fn turning_the_shortcut_off_is_not_the_same_as_never_having_chosen() {
         let dir = scratch("off");
         let path = settings_path(&dir);
-        Settings { hotkey: None }.save(&path).unwrap();
+        Settings {
+            hotkey: None,
+            ..Settings::default()
+        }
+        .save(&path)
+        .unwrap();
 
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("null"), "{text}");
@@ -193,6 +252,45 @@ mod tests {
             Settings::load(&path).hotkey.as_deref(),
             Some(DEFAULT_HOTKEY)
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn watch_rules_survive_a_round_trip() {
+        let dir = scratch("watch");
+        let path = settings_path(&dir);
+        let settings = Settings {
+            watch: vec![WatchFolder {
+                path: PathBuf::from("/home/surx/inbox"),
+                kind: "conversion".to_owned(),
+                reference: "webp".to_owned(),
+                options: BTreeMap::from([("quality".to_owned(), serde_json::json!(70))]),
+                enabled: true,
+            }],
+            output_dir: Some(PathBuf::from("/home/surx/out")),
+            ..Settings::default()
+        };
+        settings.save(&path).unwrap();
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded.watch, settings.watch);
+        assert_eq!(loaded.output_dir, settings.output_dir);
+        assert!(loaded.trigger);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn older_settings_files_gain_defaults_for_new_fields() {
+        let dir = scratch("upgrade");
+        let path = settings_path(&dir);
+        fs::write(&path, r#"{ "hotkey": "Ctrl+Shift+O" }"#).unwrap();
+        let loaded = Settings::load(&path);
+        assert!(loaded.trigger);
+        assert!(
+            loaded.watch.is_empty(),
+            "a new settings file starts with no watch rules"
+        );
+        assert!(!loaded.onboarded);
+        assert_eq!(loaded.output_dir, None);
         fs::remove_dir_all(&dir).unwrap();
     }
 

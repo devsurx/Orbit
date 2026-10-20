@@ -18,31 +18,36 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod settings;
+mod trigger;
+mod watch;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
-use orbit_jobs::{Job, JobEvent, JobState, Pick, PickKind, Runner, resolve_pick};
+use orbit_jobs::{
+    HistoryEntry, HistoryStore, Job, JobEvent, JobRequest, JobState, Pick, PickKind, Runner,
+    resolve_pick,
+};
 use orbit_registry::{
     EngineStatus, MenuModel, MenuRequest, OptionSpec, Petal, PetalKind, Registry, SourceFile,
 };
 use serde::Serialize;
-use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, Runtime, State, WebviewWindow, WindowEvent,
+    AppHandle, Emitter, Manager, PhysicalPosition, Runtime, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-use crate::settings::{HotkeyStatus, Settings};
+use crate::settings::{HotkeyStatus, Settings, WatchFolder};
+use crate::trigger::TriggerStatus;
 
 /// Ring window label; must match `tauri.conf.json`.
 const RING: &str = "ring";
-/// Ring diameter; must match the window size in `tauri.conf.json`.
-const RING_SIZE: f64 = 640.0;
 /// Event carrying the current ring contents to the webview.
 const MENU_EVENT: &str = "orbit://menu";
 /// Event carrying drag-hover state, so the ring can light up before a drop.
@@ -51,6 +56,12 @@ const DRAG_EVENT: &str = "orbit://drag";
 const JOB_EVENT: &str = "orbit://job";
 /// Event carrying a changed global shortcut, so the ring can update its hint.
 const HOTKEY_EVENT: &str = "orbit://hotkey";
+/// Event telling every window that the settings document changed.
+const SETTINGS_EVENT: &str = "orbit://settings";
+/// Event telling the settings window that the history changed.
+const HISTORY_EVENT: &str = "orbit://history";
+/// Label of the settings window, created on first use.
+const SETTINGS_WINDOW: &str = "settings";
 
 /// Everything the commands need, built once at startup.
 struct Orbit {
@@ -70,6 +81,20 @@ struct Orbit {
     settings_path: PathBuf,
     /// What the global shortcut is doing right now.
     hotkey: Mutex<HotkeyStatus>,
+    /// The local record of what was written.
+    history: HistoryStore,
+    /// Paths Orbit published recently, so a watch folder can ignore its own
+    /// output when that output lands beside the source.
+    written: Arc<Mutex<BTreeSet<PathBuf>>>,
+    /// Set by a drop, read by the trigger's release timer.
+    drag_seen: AtomicBool,
+    /// Whether the ring on screen was opened by Shift-drag.
+    triggered: AtomicBool,
+    /// Bumped every time the trigger opens the ring, so a stale timer cannot
+    /// hide a newer drag.
+    trigger_generation: AtomicU64,
+    /// Whether the input listener is running, and why not when it is not.
+    trigger: Mutex<TriggerStatus>,
 }
 
 impl Orbit {
@@ -90,6 +115,15 @@ impl Orbit {
             settings: Mutex::new(settings),
             settings_path,
             hotkey: Mutex::new(HotkeyStatus::off()),
+            history: HistoryStore::new(HistoryStore::default_path()),
+            written: Arc::new(Mutex::new(BTreeSet::new())),
+            drag_seen: AtomicBool::new(false),
+            triggered: AtomicBool::new(false),
+            trigger_generation: AtomicU64::new(0),
+            trigger: Mutex::new(TriggerStatus::unavailable(
+                true,
+                "The listener starts with the app.",
+            )),
         })
     }
 
@@ -186,6 +220,17 @@ struct Jobs {
     /// that arrives mid-shutdown should queue rather than race.
     runner: Mutex<Runner>,
     next_id: AtomicU64,
+    /// What each queued job is, so a terminal event can be written to history
+    /// with the files it came from.
+    meta: Arc<Mutex<BTreeMap<u64, JobMeta>>>,
+}
+
+/// The parts of a submission that the job event does not carry.
+#[derive(Debug, Clone)]
+struct JobMeta {
+    label: String,
+    action: String,
+    sources: Vec<PathBuf>,
 }
 
 impl Drop for Jobs {
@@ -196,6 +241,46 @@ impl Drop for Jobs {
             runner.shutdown();
         }
     }
+}
+
+/// Queue a resolved batch and remember what it was.
+///
+/// Used by the ring and by watch folders, so both produce the same events and
+/// the same history entries.
+fn enqueue(
+    jobs: &Jobs,
+    label: &str,
+    action: &str,
+    requests: Vec<JobRequest>,
+) -> Result<usize, String> {
+    if requests.is_empty() {
+        return Ok(0);
+    }
+    let runner = jobs
+        .runner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut queued = 0;
+    for request in requests {
+        let id = jobs.next_id.fetch_add(1, Ordering::Relaxed);
+        let meta = JobMeta {
+            label: label.to_owned(),
+            action: action.to_owned(),
+            sources: request.sources.clone(),
+        };
+        if !runner.submit(Job {
+            id,
+            label: label.to_owned(),
+            request,
+        }) {
+            return Err("Orbit is shutting down".to_owned());
+        }
+        if let Ok(mut map) = jobs.meta.lock() {
+            map.insert(id, meta);
+        }
+        queued += 1;
+    }
+    Ok(queued)
 }
 
 /// How many jobs to run at once.
@@ -224,9 +309,94 @@ fn detect_engines(registry: &Registry) -> BTreeMap<String, EngineStatus> {
 fn announce(event: &JobEvent) {
     match &event.state {
         JobState::Done { path } => eprintln!("orbit: wrote {}", path.display()),
+        JobState::DoneSeries { paths } => {
+            for path in paths {
+                eprintln!("orbit: wrote {}", path.display());
+            }
+        }
         JobState::Failed { message } => eprintln!("orbit: failed {} — {message}", event.label),
         JobState::Cancelled => eprintln!("orbit: cancelled {}", event.label),
         JobState::Queued | JobState::Running { .. } => {}
+    }
+}
+
+/// Write a terminal job to the local history and remember what it produced.
+fn record_event(
+    history: &HistoryStore,
+    meta: &Mutex<BTreeMap<u64, JobMeta>>,
+    written: &Mutex<BTreeSet<PathBuf>>,
+    event: &JobEvent,
+) {
+    let (outputs, ok, message) = match &event.state {
+        JobState::Done { path } => (vec![path.clone()], true, None),
+        JobState::DoneSeries { paths } => (paths.clone(), true, None),
+        JobState::Failed { message } => (Vec::new(), false, Some(message.clone())),
+        JobState::Cancelled => (Vec::new(), false, Some("cancelled".to_owned())),
+        JobState::Queued | JobState::Running { .. } => return,
+    };
+
+    // Recorded before the history lookup: the watch loops must ignore this
+    // output even if the job's metadata has already gone.
+    if let Ok(mut set) = written.lock() {
+        for path in &outputs {
+            set.insert(path.clone());
+        }
+        // The set only exists to break the watch loop; it is not a record.
+        if set.len() > 4096 {
+            set.clear();
+        }
+    }
+
+    let Some(meta) = meta.lock().ok().and_then(|mut map| map.remove(&event.id)) else {
+        return;
+    };
+    let entry = HistoryEntry::now(meta.label, meta.action, meta.sources, outputs, ok, message);
+    if let Err(error) = history.append(&entry) {
+        eprintln!("orbit: could not record history ({error})");
+    }
+}
+
+/// Rebuild the tray menu so "Recent files" reflects what just finished.
+fn refresh_tray<R: Runtime>(app: &AppHandle<R>) {
+    let status = app
+        .try_state::<Orbit>()
+        .map_or_else(HotkeyStatus::off, |orbit| orbit.hotkey());
+    if let Ok(menu) = tray_menu(app, &status) {
+        if let Some(tray) = app.tray_by_id("orbit") {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+}
+
+/// Show a file in the platform's file manager.
+fn reveal(path: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .status()
+            .is_ok()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .status()
+            .is_ok()
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let folder = path.parent().unwrap_or(path);
+        std::process::Command::new("xdg-open")
+            .arg(folder)
+            .spawn()
+            .is_ok()
+    }
+    #[cfg(not(any(unix, target_os = "windows")))]
+    {
+        let _ = path;
+        false
     }
 }
 
@@ -404,22 +574,26 @@ fn dispatch(
         .map(|request| request.engine.clone())
         .collect();
 
-    let runner = jobs
-        .runner
+    // A folder chosen in settings wins over "beside the source"; a request that
+    // already carries one (the CLI does) keeps it.
+    let output_dir = state
+        .settings
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    for request in resolution.requests {
-        let id = jobs.next_id.fetch_add(1, Ordering::Relaxed);
-        if !runner.submit(Job {
-            id,
-            label: label.clone(),
-            request,
-        }) {
-            // Only possible after shutdown, which the tray drives.
-            return DispatchAck::refused("Orbit is shutting down");
+        .ok()
+        .and_then(|settings| settings.output_dir.clone());
+    let mut requests = resolution.requests;
+    if let Some(dir) = output_dir {
+        for request in &mut requests {
+            if request.output_dir.is_none() {
+                request.output_dir = Some(dir.clone());
+            }
         }
     }
-    drop(runner);
+
+    if let Err(error) = enqueue(&jobs, &label, &reference, requests) {
+        // Only possible after shutdown, which the tray drives.
+        return DispatchAck::refused(error);
+    }
 
     let mut detail = format!(
         "via {}",
@@ -441,8 +615,22 @@ fn dispatch(
     }
 }
 
-/// Put the ring under the cursor and show it.
+/// Put the ring under the cursor and show it, taking keyboard focus.
 fn show_ring<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(orbit) = app.try_state::<Orbit>() {
+        orbit.triggered.store(false, Ordering::Relaxed);
+        // Invalidate any release timer the Shift-drag trigger left pending.
+        orbit.trigger_generation.fetch_add(1, Ordering::Relaxed);
+    }
+    show_ring_with(app, true);
+}
+
+/// The common part of every way the ring appears.
+///
+/// `focus` is false when the window is summoned in the middle of an operating
+/// system drag: taking focus then would cancel the drag before the files can be
+/// dropped. The window is made focusable again the moment a drop lands.
+fn show_ring_with<R: Runtime>(app: &AppHandle<R>, focus: bool) {
     let Some(window) = app.get_webview_window(RING) else {
         return;
     };
@@ -459,8 +647,76 @@ fn show_ring<R: Runtime>(app: &AppHandle<R>) {
     }
 
     let _ = position_at_cursor(&window);
+    if focus {
+        let _ = window.set_focusable(true);
+    }
     let _ = window.show();
-    let _ = window.set_focus();
+    if focus {
+        let _ = window.set_focus();
+    }
+}
+
+/// Shift-drag crossed the threshold: show the ring without stealing the drag.
+pub fn show_from_trigger<R: Runtime>(app: &AppHandle<R>) {
+    let Some(orbit) = app.try_state::<Orbit>() else {
+        return;
+    };
+    if !orbit.settings.lock().is_ok_and(|settings| settings.trigger) {
+        return;
+    }
+    let Some(window) = app.get_webview_window(RING) else {
+        return;
+    };
+    // A drag that arrives while the ring is already open is just passing over
+    // it; do not re-centre the window under the pointer.
+    if window.is_visible().unwrap_or(false) {
+        return;
+    }
+
+    orbit.drag_seen.store(false, Ordering::Relaxed);
+    orbit.triggered.store(true, Ordering::Relaxed);
+    orbit.trigger_generation.fetch_add(1, Ordering::Relaxed);
+    // Windows needs the window itself to be non-activating before it is shown;
+    // `show` then uses SW_SHOWNOACTIVATE. macOS and X11 only need the focus flag.
+    let _ = window.set_focusable(false);
+    show_ring_with(app, false);
+}
+
+/// The mouse button came up: if no file was dropped, get out of the way.
+pub fn release_from_trigger<R: Runtime>(app: &AppHandle<R>) {
+    let Some(orbit) = app.try_state::<Orbit>() else {
+        return;
+    };
+    if !orbit.triggered.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    let generation = orbit.trigger_generation.load(Ordering::Relaxed);
+
+    let handle = app.clone();
+    // A drop and the button release arrive in either order; wait past both.
+    let spawned = std::thread::Builder::new()
+        .name("orbit-trigger-release".to_owned())
+        .spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(450));
+            let Some(orbit) = handle.try_state::<Orbit>() else {
+                return;
+            };
+            if orbit.trigger_generation.load(Ordering::Relaxed) != generation {
+                return;
+            }
+            if orbit.drag_seen.load(Ordering::Relaxed) {
+                return;
+            }
+            if let Some(window) = handle.get_webview_window(RING) {
+                if window.is_visible().unwrap_or(false) {
+                    let _ = window.set_focusable(true);
+                    let _ = window.hide();
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("orbit: could not schedule the ring to close ({error})");
+    }
 }
 
 /// File paths given on the command line: the "Open with Orbit" / "Send to"
@@ -599,6 +855,7 @@ fn set_hotkey<R: Runtime>(app: &AppHandle<R>, choice: Option<&str>) {
         }
     }
     let _ = app.emit_to(RING, HOTKEY_EVENT, status);
+    let _ = app.emit_to(SETTINGS_WINDOW, SETTINGS_EVENT, ());
 }
 
 /// The tray menu, rebuilt whenever the shortcut changes.
@@ -607,8 +864,45 @@ fn set_hotkey<R: Runtime>(app: &AppHandle<R>, choice: Option<&str>) {
 /// buttons and the current choice otherwise has nowhere to be seen.
 fn tray_menu<R: Runtime>(app: &AppHandle<R>, hotkey: &HotkeyStatus) -> tauri::Result<Menu<R>> {
     let open = MenuItem::with_id(app, "open", "Open ring", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let reload = MenuItem::with_id(app, "reload", "Reload engines", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Orbit", true, None::<&str>)?;
+
+    let recent = Submenu::with_id(app, "recent", "Recent files", true)?;
+    let entries = app
+        .try_state::<Orbit>()
+        .map_or_else(Vec::new, |orbit| orbit.history.load(8));
+    let mut listed = 0;
+    for entry in &entries {
+        for path in entry.outputs.iter().take(1) {
+            recent.append(&MenuItem::with_id(
+                app,
+                format!("recent:{}", path.display()),
+                truncate(&entry.menu_label(), 52),
+                true,
+                None::<&str>,
+            )?)?;
+            listed += 1;
+        }
+    }
+    if listed == 0 {
+        recent.append(&MenuItem::with_id(
+            app,
+            "recent:none",
+            "Nothing yet",
+            false,
+            None::<&str>,
+        )?)?;
+    } else {
+        recent.append(&PredefinedMenuItem::separator(app)?)?;
+        recent.append(&MenuItem::with_id(
+            app,
+            "history:clear",
+            "Clear history",
+            true,
+            None::<&str>,
+        )?)?;
+    }
 
     let shortcut = Submenu::with_id(app, "shortcut", "Shortcut", true)?;
     for (accelerator, label) in settings::PRESETS {
@@ -637,7 +931,20 @@ fn tray_menu<R: Runtime>(app: &AppHandle<R>, hotkey: &HotkeyStatus) -> tauri::Re
         None::<&str>,
     )?)?;
 
-    Menu::with_items(app, &[&open, &shortcut, &reload, &quit])
+    Menu::with_items(
+        app,
+        &[&open, &recent, &settings_item, &shortcut, &reload, &quit],
+    )
+}
+
+/// Cut a menu label down to something a tray can show.
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut short: String = text.chars().take(max.saturating_sub(1)).collect();
+    short.push('…');
+    short
 }
 
 /// Build the tray icon. Left click opens the ring; the menu has the rest.
@@ -658,8 +965,24 @@ fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 set_hotkey(app, choice);
                 return;
             }
+            if let Some(path) = id.strip_prefix("recent:") {
+                if path != "none" {
+                    reveal(Path::new(path));
+                }
+                return;
+            }
             match id.as_str() {
                 "open" => show_ring(app),
+                "settings" => open_settings_window(app, None),
+                "history:clear" => {
+                    if let Some(orbit) = app.try_state::<Orbit>() {
+                        if let Err(error) = orbit.history.clear() {
+                            eprintln!("orbit: could not clear history ({error})");
+                        }
+                    }
+                    refresh_tray(app);
+                    let _ = app.emit_to(SETTINGS_WINDOW, HISTORY_EVENT, ());
+                }
                 "reload" => {
                     if let Some(orbit) = app.try_state::<Orbit>() {
                         orbit.refresh_engines();
@@ -692,15 +1015,406 @@ fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// One shortcut the settings window offers.
+#[derive(Debug, Serialize)]
+struct HotkeyPreset {
+    accelerator: String,
+    label: String,
+}
+
+/// Everything the settings window renders, in one document.
+///
+/// A flat view model: the bools are independent switches a form binds to, not
+/// one state machine.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Serialize)]
+struct SettingsView {
+    hotkey: Option<String>,
+    hotkey_label: String,
+    hotkey_registered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hotkey_note: Option<String>,
+    hotkey_presets: Vec<HotkeyPreset>,
+    trigger: bool,
+    trigger_listening: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trigger_note: Option<String>,
+    output_dir: Option<String>,
+    onboarded: bool,
+    watch: Vec<WatchFolder>,
+    history_path: String,
+    settings_path: String,
+    version: String,
+    wayland: bool,
+}
+
+/// Snapshot the settings and the state of both triggers.
+fn settings_view(state: &Orbit) -> SettingsView {
+    let settings = state
+        .settings
+        .lock()
+        .map(|settings| settings.clone())
+        .unwrap_or_default();
+    let hotkey = state.hotkey();
+    let trigger = state.trigger.lock().map_or_else(
+        |_| TriggerStatus::unavailable(settings.trigger, "Status unavailable"),
+        |status| status.clone(),
+    );
+
+    SettingsView {
+        hotkey: settings.hotkey,
+        hotkey_label: hotkey.label,
+        hotkey_registered: hotkey.registered,
+        hotkey_note: hotkey.note,
+        hotkey_presets: settings::PRESETS
+            .iter()
+            .map(|(accelerator, label)| HotkeyPreset {
+                accelerator: (*accelerator).to_owned(),
+                label: (*label).to_owned(),
+            })
+            .collect(),
+        trigger: settings.trigger,
+        trigger_listening: trigger.listening,
+        trigger_note: trigger.note,
+        output_dir: settings.output_dir.map(|path| path.display().to_string()),
+        onboarded: settings.onboarded,
+        watch: settings.watch,
+        history_path: state.history.path().display().to_string(),
+        settings_path: state.settings_path.display().to_string(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        wayland: on_wayland(),
+    }
+}
+
+/// Save the current document and tell every window.
+fn persist_settings<R: Runtime>(app: &AppHandle<R>, state: &Orbit) -> bool {
+    let snapshot = state.settings.lock().ok().map(|settings| settings.clone());
+    let Some(settings) = snapshot else {
+        return false;
+    };
+    if let Err(error) = settings.save(&state.settings_path) {
+        eprintln!("orbit: could not save settings ({error})");
+        return false;
+    }
+    let _ = app.emit_to(RING, SETTINGS_EVENT, ());
+    let _ = app.emit_to(SETTINGS_WINDOW, SETTINGS_EVENT, ());
+    refresh_tray(app);
+    true
+}
+
+/// Show the settings window, creating it the first time.
+fn open_settings_window<R: Runtime>(app: &AppHandle<R>, section: Option<&str>) {
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit(SETTINGS_EVENT, ());
+        if let Some(section) = section {
+            let _ = window.emit("orbit://section", section);
+        }
+        return;
+    }
+
+    // A hash route, not a query: the production asset resolver looks up
+    // `index.html` and the fragment stays in the webview.
+    let hash = section.map_or_else(
+        || "#settings".to_owned(),
+        |section| format!("#settings/{section}"),
+    );
+    let url = WebviewUrl::App(format!("index.html{hash}").into());
+    match WebviewWindowBuilder::new(app, SETTINGS_WINDOW, url)
+        .title("Orbit settings")
+        .inner_size(680.0, 800.0)
+        .min_inner_size(540.0, 560.0)
+        // Avoid a white flash before the first paint on an opaque window.
+        .background_color(tauri::window::Color(11, 11, 18, 255))
+        .center()
+        .build()
+    {
+        Ok(window) => {
+            let _ = window.set_focus();
+        }
+        Err(error) => eprintln!("orbit: could not open settings ({error})"),
+    }
+}
+
+/// The settings document, plus what is actually running.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn get_settings(state: State<'_, Orbit>) -> SettingsView {
+    if std::env::var_os("ORBIT_TRACE").is_some() {
+        eprintln!("orbit: settings window asked for its document");
+    }
+    settings_view(&state)
+}
+
+/// Just the Shift-drag state, for the ring's idle hint.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn trigger_status(state: State<'_, Orbit>) -> TriggerStatus {
+    state.trigger.lock().map_or_else(
+        |_| TriggerStatus::unavailable(false, "Status unavailable"),
+        |status| status.clone(),
+    )
+}
+
+/// Open (or focus) the settings window.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn open_settings(app: AppHandle, section: Option<String>) {
+    open_settings_window(&app, section.as_deref());
+}
+
+/// Turn Shift-drag on or off immediately.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn set_trigger(app: AppHandle, state: State<'_, Orbit>, enabled: bool) -> SettingsView {
+    if let Ok(mut settings) = state.settings.lock() {
+        settings.trigger = enabled;
+    }
+    if let Ok(mut status) = state.trigger.lock() {
+        status.enabled = enabled;
+    }
+    persist_settings(&app, &state);
+    settings_view(&state)
+}
+
+/// Choose the folder every result goes to; an empty string means "beside the
+/// source".
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn set_output_dir(
+    app: AppHandle,
+    state: State<'_, Orbit>,
+    dir: Option<String>,
+) -> Result<SettingsView, String> {
+    let path = dir
+        .map(|dir| dir.trim().to_owned())
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from);
+    let path = match path {
+        Some(path) if path.is_dir() => Some(
+            std::fs::canonicalize(&path).map_err(|error| format!("{}: {error}", path.display()))?,
+        ),
+        Some(path) => return Err(format!("{} is not a folder", path.display())),
+        None => None,
+    };
+    if let Ok(mut settings) = state.settings.lock() {
+        settings.output_dir = path;
+    }
+    persist_settings(&app, &state);
+    Ok(settings_view(&state))
+}
+
+/// Dismiss the first-run welcome.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn mark_onboarded(app: AppHandle, state: State<'_, Orbit>) -> SettingsView {
+    if let Ok(mut settings) = state.settings.lock() {
+        settings.onboarded = true;
+    }
+    persist_settings(&app, &state);
+    settings_view(&state)
+}
+
+/// Change the global shortcut from the settings window.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn choose_hotkey(app: AppHandle, accelerator: Option<String>) -> HotkeyStatus {
+    set_hotkey(&app, accelerator.as_deref());
+    let _ = app.emit_to(SETTINGS_WINDOW, SETTINGS_EVENT, ());
+    app.try_state::<Orbit>()
+        .map_or_else(HotkeyStatus::off, |orbit| orbit.hotkey())
+}
+
+/// Recent jobs, newest first.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn history(state: State<'_, Orbit>, limit: Option<usize>) -> Vec<HistoryEntry> {
+    state.history.load(limit.unwrap_or(50).clamp(1, 1000))
+}
+
+/// Forget every recorded job.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn clear_history(app: AppHandle, state: State<'_, Orbit>) -> bool {
+    match state.history.clear() {
+        Ok(()) => {
+            refresh_tray(&app);
+            let _ = app.emit_to(SETTINGS_WINDOW, HISTORY_EVENT, ());
+            true
+        }
+        Err(error) => {
+            eprintln!("orbit: could not clear history ({error})");
+            false
+        }
+    }
+}
+
+/// Show one result in the file manager.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn reveal_path(path: String) -> bool {
+    reveal(Path::new(&path))
+}
+
+/// One option in the watch-folder editor.
+#[derive(Debug, Serialize)]
+struct WatchChoice {
+    kind: String,
+    reference: String,
+    label: String,
+    hint: String,
+}
+
+/// Everything a watch folder can be pointed at.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn watch_choices(state: State<'_, Orbit>) -> Vec<WatchChoice> {
+    let mut choices = Vec::new();
+    for action in state.registry.actions() {
+        choices.push(WatchChoice {
+            kind: "action".to_owned(),
+            reference: action.id.clone(),
+            label: action.label.clone(),
+            hint: "Action".to_owned(),
+        });
+    }
+    for chain in state.registry.chains() {
+        choices.push(WatchChoice {
+            kind: "preset".to_owned(),
+            reference: chain.id.clone(),
+            label: chain.label.clone(),
+            hint: "Preset".to_owned(),
+        });
+    }
+    for format in state.registry.formats() {
+        if format.can.write {
+            choices.push(WatchChoice {
+                kind: "conversion".to_owned(),
+                reference: format.id.clone(),
+                label: format!("→ {}", format.id.to_uppercase()),
+                hint: format.kind.to_string(),
+            });
+        }
+    }
+    choices
+}
+
+/// Add or retarget the rule for a folder.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn add_watch(
+    app: AppHandle,
+    state: State<'_, Orbit>,
+    path: String,
+    kind: String,
+    reference: String,
+) -> Result<SettingsView, String> {
+    let dir = PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err(format!("{} is not a folder", dir.display()));
+    }
+    // Absolute and symlink-free, so the scanner and the output set agree on
+    // what "this file" means.
+    let dir = std::fs::canonicalize(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    let kind = kind.to_ascii_lowercase();
+    let known = match kind.as_str() {
+        "conversion" => state
+            .registry
+            .format(&reference)
+            .is_some_and(|format| format.can.write),
+        "action" => state.registry.action(&reference).is_some(),
+        "preset" => state.registry.chain(&reference).is_some(),
+        _ => false,
+    };
+    if !known {
+        return Err(format!("{reference} is not a {kind} Orbit knows"));
+    }
+
+    if let Ok(mut settings) = state.settings.lock() {
+        // One rule per folder: retargeting is clearer than quietly running two
+        // conversions on every file that lands there.
+        if let Some(existing) = settings.watch.iter_mut().find(|rule| rule.path == dir) {
+            existing.kind = kind;
+            existing.reference = reference;
+            existing.enabled = true;
+        } else {
+            settings.watch.push(WatchFolder {
+                path: dir,
+                kind,
+                reference,
+                options: BTreeMap::new(),
+                enabled: true,
+            });
+        }
+    }
+    if !persist_settings(&app, &state) {
+        return Err("the settings file could not be written".to_owned());
+    }
+    Ok(settings_view(&state))
+}
+
+/// Remove a folder from the watch list.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn remove_watch(app: AppHandle, state: State<'_, Orbit>, index: usize) -> SettingsView {
+    if let Ok(mut settings) = state.settings.lock() {
+        if index < settings.watch.len() {
+            settings.watch.remove(index);
+        }
+    }
+    persist_settings(&app, &state);
+    settings_view(&state)
+}
+
+/// Pause or resume one rule without forgetting it.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn set_watch_enabled(
+    app: AppHandle,
+    state: State<'_, Orbit>,
+    index: usize,
+    enabled: bool,
+) -> SettingsView {
+    if let Ok(mut settings) = state.settings.lock() {
+        if let Some(rule) = settings.watch.get_mut(index) {
+            rule.enabled = enabled;
+        }
+    }
+    persist_settings(&app, &state);
+    settings_view(&state)
+}
+
 /// Centre the window on the pointer, which is what makes this feel radial.
+///
+/// The window's *physical* size is what matters: at 200 % scaling (every Retina
+/// display, and many Windows laptops) it is twice the CSS size, and subtracting
+/// half of the logical size would put the cursor in the top-left quadrant. The
+/// position is then clamped to the monitor under the cursor, because a ring
+/// that is half off-screen near an edge is not radial.
 #[allow(clippy::cast_possible_truncation)] // screen coordinates are tiny next to i32
 fn position_at_cursor<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
     let cursor = window.cursor_position()?;
-    let x = (cursor.x - RING_SIZE / 2.0).round() as i32;
-    let y = (cursor.y - RING_SIZE / 2.0).round() as i32;
-    window.set_position(PhysicalPosition::new(x, y))
+    let physical = window.inner_size()?;
+    let mut x = cursor.x - f64::from(physical.width) / 2.0;
+    let mut y = cursor.y - f64::from(physical.height) / 2.0;
+
+    if let Ok(Some(monitor)) = window.monitor_from_point(cursor.x, cursor.y) {
+        let origin = monitor.position();
+        let size = monitor.size();
+        let left = f64::from(origin.x);
+        let top = f64::from(origin.y);
+        let right = left + f64::from(size.width);
+        let bottom = top + f64::from(size.height);
+        x = x.clamp(left, (right - f64::from(physical.width)).max(left));
+        y = y.clamp(top, (bottom - f64::from(physical.height)).max(top));
+    }
+
+    window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))
 }
 
+#[allow(clippy::too_many_lines)] // the builder: plugins, commands, setup, run loop
 fn main() {
     tauri::Builder::default()
         // Registered first: it decides whether this process is the owner of the
@@ -711,8 +1425,10 @@ fn main() {
         // exec, orbit-app` becomes a working trigger — as long as the second
         // launch hands its files over and exits instead of adding another tray
         // icon and another overlay.
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             eprintln!("orbit: already running — handing the request to the live instance");
+            let requested_hotkey = hotkey_from_args(argv.iter().skip(1));
             if let Some(orbit) = app.try_state::<Orbit>() {
                 // `argv[0]` is the executable itself, not a file the user picked.
                 let paths = selection_from_args(argv.into_iter().skip(1));
@@ -742,6 +1458,14 @@ fn main() {
                     }
                 }
             }
+
+            // A second launch can carry `--hotkey=…` as well as files; a script
+            // that changes the shortcut should not have to quit the app first.
+            match requested_hotkey {
+                HotkeyArg::Absent => {}
+                HotkeyArg::Off => set_hotkey(app, None),
+                HotkeyArg::Custom(accelerator) => set_hotkey(app, Some(&accelerator)),
+            }
             show_ring(app);
         }))
         .plugin(
@@ -755,6 +1479,12 @@ fn main() {
         )
         .setup(|app| {
             let orbit = Orbit::new(app.handle())?;
+            let written = orbit.written.clone();
+            let history = orbit.history.clone();
+            let configured_trigger = orbit
+                .settings
+                .lock()
+                .map_or(true, |settings| settings.trigger);
 
             // Files handed to us on the command line are the "Open with Orbit"
             // / "Send to" route: treat them as the current selection.
@@ -781,17 +1511,52 @@ fn main() {
             app.manage(orbit);
 
             // The pool reports straight to the ring, from whichever worker
-            // thread the job happens to be running on.
+            // thread the job happens to be running on. Each terminal event is
+            // also written to the local history and added to the set of files
+            // watch folders must ignore.
+            let meta = Arc::new(Mutex::new(BTreeMap::new()));
+            let jobs_meta = Arc::clone(&meta);
+            let jobs_written = Arc::clone(&written);
+            let jobs_history = history.clone();
             let handle = app.handle().clone();
             app.manage(Jobs {
                 runner: Mutex::new(Runner::new(worker_count(), move |event| {
                     announce(&event);
+                    let terminal = matches!(
+                        &event.state,
+                        JobState::Done { .. }
+                            | JobState::DoneSeries { .. }
+                            | JobState::Failed { .. }
+                            | JobState::Cancelled
+                    );
+                    record_event(&jobs_history, &jobs_meta, &jobs_written, &event);
                     let _ = handle.emit_to(RING, JOB_EVENT, event);
+                    if terminal {
+                        let _ = handle.emit_to(SETTINGS_WINDOW, HISTORY_EVENT, ());
+                        // Menu construction is main-thread work on macOS; worker
+                        // threads only ever ask for it.
+                        let tray_handle = handle.clone();
+                        let _ = handle.run_on_main_thread(move || {
+                            refresh_tray(&tray_handle);
+                        });
+                    }
                 })),
                 next_id: AtomicU64::new(1),
+                meta,
             });
 
             setup_tray(app.handle())?;
+
+            // The input listener starts now and checks the setting on every
+            // event, so the toggle needs no restart.
+            let mut trigger_status = trigger::start(app.handle());
+            trigger_status.enabled = configured_trigger;
+            if let Some(orbit) = app.try_state::<Orbit>() {
+                if let Ok(mut current) = orbit.trigger.lock() {
+                    *current = trigger_status;
+                }
+            }
+            watch::start(app.handle().clone());
 
             // A shortcut named on the command line is a one-off override that is
             // remembered, so a script (or an installer) can set the trigger up.
@@ -811,13 +1576,40 @@ fn main() {
                 show_ring(app.handle());
             }
 
+            // A fresh install gets the setup window once, with the three facts
+            // that make the app make sense: how to summon it, where files go,
+            // and that nothing leaves the machine.
+            let first_run = app.try_state::<Orbit>().is_some_and(|orbit| {
+                orbit
+                    .settings
+                    .lock()
+                    .is_ok_and(|settings| !settings.onboarded)
+            });
+            if first_run && !opened_with_files {
+                open_settings_window(app.handle(), Some("welcome"));
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             menu_for,
             dispatch,
             option_specs,
-            hotkey_status
+            hotkey_status,
+            get_settings,
+            trigger_status,
+            open_settings,
+            set_trigger,
+            set_output_dir,
+            mark_onboarded,
+            choose_hotkey,
+            history,
+            clear_history,
+            reveal_path,
+            watch_choices,
+            add_watch,
+            remove_watch,
+            set_watch_enabled
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::CloseRequested { api, .. } => {
@@ -846,6 +1638,14 @@ fn handle_drag<R: Runtime>(window: &tauri::Window<R>, event: &tauri::DragDropEve
             );
         }
         tauri::DragDropEvent::Drop { paths, .. } => {
+            // A file landed: the trigger's release timer must not hide the ring,
+            // and the window may accept keyboard input again.
+            if let Some(orbit) = app.try_state::<Orbit>() {
+                orbit.drag_seen.store(true, Ordering::Relaxed);
+                orbit.triggered.store(false, Ordering::Relaxed);
+            }
+            let _ = window.set_focusable(true);
+            let _ = window.set_focus();
             let _ = window.emit(
                 DRAG_EVENT,
                 DragPayload {

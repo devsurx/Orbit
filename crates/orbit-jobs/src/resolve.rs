@@ -18,11 +18,12 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use orbit_registry::{
-    Action, EngineStatus, Format, Kind, Probe, Registry, Rule, SourceFile, any_selector_matches,
+    Action, Chain, EngineStatus, Format, Kind, Probe, Registry, Rule, SourceFile,
+    any_selector_matches,
 };
 use serde_json::Value;
 
-use crate::plan::{JobRequest, Options};
+use crate::plan::{JobRequest, Options, StepRequest};
 
 /// The action conversions run under; its tag names their output.
 const CONVERT: &str = "convert";
@@ -119,6 +120,9 @@ pub enum ResolveError {
     /// The petal named an action the registry does not have.
     #[error("unknown action \"{0}\"")]
     UnknownAction(String),
+    /// The petal named a preset the registry does not have.
+    #[error("unknown preset \"{0}\"")]
+    UnknownChain(String),
     /// The petal named a format the registry does not have, or one with no
     /// extension to write.
     #[error("unknown format \"{0}\"")]
@@ -178,6 +182,11 @@ enum Intent {
         /// How the result's extension is decided.
         ext: ExtRule,
     },
+    /// Run a saved chain or preset.
+    Chain {
+        /// The chain, copied so the registry borrow ends here.
+        chain: Box<Chain>,
+    },
 }
 
 /// How an action's output extension is decided.
@@ -218,10 +227,14 @@ impl Intent {
     fn from_pick(registry: &Registry, pick: &Pick) -> Result<Self, ResolveError> {
         match pick.kind {
             PickKind::Operator => Err(ResolveError::NotAJob(pick.reference.clone())),
-            PickKind::Preset => Err(ResolveError::NotYetSupported(format!(
-                "chains and presets ({})",
-                pick.reference
-            ))),
+            PickKind::Preset => {
+                let chain = registry
+                    .chain(&pick.reference)
+                    .ok_or_else(|| ResolveError::UnknownChain(pick.reference.clone()))?;
+                Ok(Self::Chain {
+                    chain: Box::new(chain.clone()),
+                })
+            }
             PickKind::Conversion => {
                 let target = registry
                     .format(&pick.reference)
@@ -262,7 +275,7 @@ impl Intent {
     fn combines(&self) -> bool {
         match self {
             Self::Edit { action, .. } => action.combines,
-            Self::Convert { .. } => false,
+            Self::Convert { .. } | Self::Chain { .. } => false,
         }
     }
 
@@ -276,6 +289,20 @@ impl Intent {
         sources: &[PathBuf],
     ) -> Resolution {
         let mut resolution = Resolution::default();
+
+        if let Self::Chain { chain } = self {
+            for path in sources {
+                match Self::chain_request(registry, statuses, available, chain, pick, path) {
+                    Ok(request) => resolution.requests.push(request),
+                    Err(reason) => resolution.skipped.push(Skipped {
+                        path: path.clone(),
+                        reason,
+                    }),
+                }
+            }
+            return resolution;
+        }
+
         for path in sources {
             let file = probe_file(registry, path);
             let assembled = self.spec(registry, &file, &pick.defaults).and_then(|spec| {
@@ -297,6 +324,50 @@ impl Intent {
             }
         }
         resolution
+    }
+
+    /// Turn a chain into one request whose steps have all been resolved.
+    fn chain_request(
+        registry: &Registry,
+        statuses: &BTreeMap<String, EngineStatus>,
+        available: &BTreeSet<String>,
+        chain: &Chain,
+        pick: &Pick,
+        path: &Path,
+    ) -> Result<JobRequest, String> {
+        let file = probe_file(registry, path);
+        if !any_selector_matches(&chain.applies_to, &file.probe) {
+            return Err(format!(
+                "{} does not apply to {}",
+                chain.label,
+                describe(&file.probe)
+            ));
+        }
+
+        let mut probe = file.probe.clone();
+        let mut steps = Vec::with_capacity(chain.steps.len());
+        for step in &chain.steps {
+            let (request, next) =
+                resolve_step(registry, statuses, available, &probe, step, &chain.label)?;
+            probe = next;
+            steps.push(request);
+        }
+        let Some(last) = steps.last() else {
+            return Err(format!("{} has no steps", chain.label));
+        };
+
+        Ok(JobRequest {
+            engine: last.engine.clone(),
+            program: last.program.clone(),
+            kind: file.probe.kind,
+            action: "chain".to_owned(),
+            target_ext: last.target_ext.clone(),
+            tag: chain.id.clone(),
+            sources: vec![path.to_path_buf()],
+            options: pick.defaults.clone(),
+            output_dir: None,
+            steps,
+        })
     }
 
     /// One job covering every file the pick suits.
@@ -383,7 +454,7 @@ impl Intent {
     fn minimum(&self) -> Option<usize> {
         match self {
             Self::Edit { action, .. } => Some(action.requires_files as usize),
-            Self::Convert { .. } => None,
+            Self::Convert { .. } | Self::Chain { .. } => None,
         }
     }
 
@@ -447,6 +518,7 @@ impl Intent {
                     probe: probe.clone(),
                 })
             }
+            Self::Chain { .. } => Err("a chain is resolved one step at a time".to_owned()),
         }
     }
 }
@@ -495,7 +567,138 @@ fn assemble(
         sources,
         options: pick.defaults.clone(),
         output_dir: None,
+        steps: Vec::new(),
     })
+}
+
+/// Resolve one chain step against the format the previous step produced.
+#[allow(clippy::too_many_lines)] // one linear pass over the step's fields
+fn resolve_step(
+    registry: &Registry,
+    statuses: &BTreeMap<String, EngineStatus>,
+    available: &BTreeSet<String>,
+    probe: &Probe,
+    step: &orbit_registry::ChainStep,
+    label: &str,
+) -> Result<(StepRequest, Probe), String> {
+    let (action_id, candidates, requires, target, target_ext, tag, options): (
+        String,
+        Vec<String>,
+        Vec<String>,
+        Option<&Format>,
+        String,
+        String,
+        Options,
+    ) = if step.action == CONVERT {
+        let to = step
+            .options
+            .get("to")
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("{label}: a convert step needs a \"to\" format"))?;
+        let format = registry
+            .format(to)
+            .ok_or_else(|| format!("{label}: unknown format \"{to}\""))?;
+        let rule = rule_for(registry, probe, to).ok_or_else(|| {
+            format!(
+                "{label}: {} cannot become {}",
+                describe(probe),
+                to.to_uppercase()
+            )
+        })?;
+        let ext = format
+            .extensions
+            .first()
+            .cloned()
+            .ok_or_else(|| format!("{label}: {to} has no extension"))?;
+        let mut options = rule.defaults.clone();
+        options.extend(step.options.clone());
+        let tag = registry
+            .action(CONVERT)
+            .map_or_else(|| FALLBACK_TAG.to_owned(), |action| action.tag.clone());
+        (
+            CONVERT.to_owned(),
+            rule.engines.clone(),
+            rule.requires.clone(),
+            Some(format),
+            ext,
+            tag,
+            options,
+        )
+    } else {
+        let action = registry
+            .action(&step.action)
+            .ok_or_else(|| format!("{label}: unknown action \"{}\"", step.action))?;
+        if !any_selector_matches(&action.applies_to, probe) {
+            return Err(format!(
+                "{label}: {} does not apply to {}",
+                action.label,
+                describe(probe)
+            ));
+        }
+        if action.combines {
+            return Err(format!(
+                "{label}: {} merges files, which a preset cannot do",
+                action.label
+            ));
+        }
+        let ext = if action.output_ext == KEEP_EXT {
+            if probe.ext.is_empty() {
+                return Err(format!("{label}: {} has no extension", describe(probe)));
+            }
+            probe.ext.clone()
+        } else {
+            action.output_ext.clone()
+        };
+        let mut options = action.defaults.clone();
+        options.extend(step.options.clone());
+        (
+            action.id.clone(),
+            action.engines_for(probe.kind).to_vec(),
+            action.requires_for(probe.kind).to_vec(),
+            None,
+            ext,
+            action.tag.clone(),
+            options,
+        )
+    };
+
+    let choice = registry.choose_engine(&candidates, &requires, probe, target, available);
+    let Some(engine) = choice.chosen else {
+        return Err(match choice.missing {
+            Some(missing) => format!("{label} needs {missing}, which is not installed"),
+            None => format!("{label} cannot {} this file here", step.action),
+        });
+    };
+    let program = statuses
+        .get(&engine)
+        .and_then(|status| status.binary.clone())
+        .unwrap_or_else(|| PathBuf::from(&engine));
+
+    let next = target.map_or_else(
+        || {
+            let mut next = probe.clone();
+            next.ext.clone_from(&target_ext);
+            next
+        },
+        |format| {
+            let mut next = Probe::of_format(format, &target_ext);
+            next.ext.clone_from(&target_ext);
+            next
+        },
+    );
+
+    Ok((
+        StepRequest {
+            engine,
+            program,
+            kind: probe.kind,
+            action: action_id,
+            target_ext,
+            tag,
+            options,
+        },
+        next,
+    ))
 }
 
 /// What a merge produces, given the family of its inputs and the output chosen.
@@ -544,6 +747,7 @@ fn option_text(options: &Options, key: &str) -> Option<String> {
 fn action_label(intent: &Intent) -> String {
     match intent {
         Intent::Edit { action, .. } => action.label.clone(),
+        Intent::Chain { chain } => chain.label.clone(),
         Intent::Convert { .. } => "convert".to_owned(),
     }
 }

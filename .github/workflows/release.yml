@@ -1,6 +1,6 @@
 name: Release
 
-# Tag `v0.1.0` and this builds the installers on all three platforms and files
+# Tag `v0.2.0` and this builds the installers on all three platforms and files
 # them under a draft release, so the notes can be read before anything ships.
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev patchelf rpm
+            librsvg2-dev libxtst-dev libxi-dev patchelf rpm
 
       - uses: actions/setup-node@v4
         with:
@@ -77,24 +77,54 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
           releaseBody: |
-            A background radial file converter and editor. Drop files on the
-            ring, pick a petal, and the result lands beside the source as
-            `name (converted).ext` — nothing is uploaded, ever.
+            Orbit is a background radial file converter. **Shift-drag a file**
+            anywhere, pick a petal, and the result lands beside the source as
+            `name (converted).ext` — atomically, without overwriting anything,
+            and without uploading a byte.
+
+            **New in 0.2.0**
+
+            - **Shift-drag anywhere** on Windows, macOS and X11. The ring appears
+              under the pointer without stealing the drag; releasing without a
+              drop dismisses it.
+            - **A real settings window**: trigger on/off, global shortcut, output
+              folder, watch folders, and the local history. First run gets a
+              short welcome.
+            - **Watch folders**: point Orbit at a folder and give it one rule.
+              Existing files are left alone; new files are converted after they
+              have settled. Results Orbit writes are ignored, so there is no loop.
+            - **Local history** in an append-only JSONL file, with recent files in
+              the tray, reveal-in-file-manager, and clear.
+            - **Series output**: PDF page ranges become `scan (page 001).png`, …;
+              extracted frames become `clip (frame 001).png`, …; presets run as
+              chains with hidden intermediates.
+            - **`orbit-cli`**: `convert`, `action`, `preset`, `list`, `history`
+              with `--out`, `--option key=value` and `--json`, using the same
+              registry and defaults as the ring.
+            - **Wayland**: honest about the limits — no global Shift-drag and no
+              in-app hotkey. The settings window says why, and the tray,
+              `Open with Orbit` and a compositor binding all still work.
 
             **Install**
 
             | Platform | File | Notes |
             |---|---|---|
-            | Windows 10/11 | `.exe` (NSIS) or `.msi` | Per-user install, no administrator prompt. WebView2 is fetched on first run if the machine does not already have it. |
-            | macOS 12+ | `.dmg` | Real Apple silicon and Intel builds. Grant Accessibility permission for the global hotkey. |
-            | Linux | `.AppImage`, `.deb`, `.rpm` | Needs `libwebkit2gtk-4.1`. X11 only for global hooks; on Wayland use the tray or bind Orbit in your compositor. |
+            | Windows 10/11 | `.exe` (NSIS) or `.msi` | Per-user install, no administrator prompt. WebView2 is fetched on first run if the machine does not already have it. Allow low-level input hooks if your security software asks. |
+            | macOS 12+ | `.dmg` | Separate Apple-silicon and Intel builds. Grant **Accessibility** permission for Shift-drag and the global shortcut. Nothing is notarised yet, so the first launch may need **Open** from Finder. |
+            | Linux | `.AppImage`, `.deb`, `.rpm` | Needs `libwebkit2gtk-4.1`, `libxtst6`, `libxi6`. Shift-drag and the hotkey are X11 only; on Wayland bind Orbit in your compositor. |
 
-            **Summon the ring** with the global shortcut
-            (`Ctrl`/`⌘` + `Shift` + `Space` by default — change it under
-            **tray → Shortcut**), from the tray icon, or by handing Orbit files:
-            `orbit-app photo.png`. The Shift-drag-anywhere trigger is the next
-            milestone; the ring is already a real drop target.
+            **Summon the ring** with <kbd>Ctrl</kbd>/<kbd>⌘</kbd> +
+            <kbd>Shift</kbd> + <kbd>Space</kbd> (change it in the tray or
+            settings), by Shift-dragging a file, from the tray icon, or by handing
+            Orbit files: `orbit-app photo.png`.
 
             Everything runs locally through engines already on your machine
-            (FFmpeg, ImageMagick, Ghostscript, …), plus the built-in engine that
-            needs nothing at all. No telemetry, no account, no network calls.
+            (FFmpeg, ImageMagick 7, Ghostscript, Poppler, qpdf, LibreOffice,
+            Tesseract…), plus the built-in engine that needs nothing at all. No
+            telemetry, no account, no network calls.
+
+            **Verified where it can be.** Linux has been exercised end-to-end
+            against the real engines. Windows and macOS type-check on every push
+            and their installers are built on those operating systems by CI;
+            runtime behaviour of their input hooks still needs reports from real
+            machines. Details and the full test matrix are in the README.

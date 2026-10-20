@@ -3,24 +3,58 @@
     "id": "image-to-image",
     "label": "Image",
     "kind": "conversion",
-    "from": { "kind": "image", "not": { "format": "svg" } },
+    "from": {
+      "kind": "image",
+      "not": {
+        "format": "svg"
+      }
+    },
     "to": "@writable:image",
-    "engines": ["vips", "magick", "orbit-native"],
+    "engines": [
+      "vips",
+      "magick",
+      "orbit-native"
+    ],
     "requires": [],
-    "defaults": { "quality": 82 },
-    "options": ["quality", "resize_mode", "percent", "max_dim", "resize_preset", "strip_metadata", "background"],
+    "defaults": {
+      "quality": 82
+    },
+    "options": [
+      "quality",
+      "resize_mode",
+      "percent",
+      "max_dim",
+      "resize_preset",
+      "strip_metadata",
+      "background"
+    ],
     "rank": 60
   },
   {
     "id": "vector-to-image",
     "label": "Vector to bitmap",
     "kind": "conversion",
-    "from": { "format": "svg" },
+    "from": {
+      "format": "svg"
+    },
     "to": "@writable:image",
-    "engines": ["vips", "magick"],
-    "requires": ["op:raster"],
-    "defaults": { "scale": 1, "background": "#ffffff", "quality": 90 },
-    "options": ["scale", "background", "quality"],
+    "engines": [
+      "vips",
+      "magick"
+    ],
+    "requires": [
+      "op:raster"
+    ],
+    "defaults": {
+      "scale": 1,
+      "background": "#ffffff",
+      "quality": 90
+    },
+    "options": [
+      "scale",
+      "background",
+      "quality"
+    ],
     "rank": 40,
     "note": "Rendered at scale 1 by default; use scale 2 for retina screens."
   },
@@ -28,12 +62,27 @@
     "id": "heic-to-image",
     "label": "iPhone photo",
     "kind": "conversion",
-    "from": { "format": "heic" },
+    "from": {
+      "format": "heic"
+    },
     "to": "@writable:image",
-    "engines": ["libheif", "vips", "magick"],
-    "requires": ["op:raster"],
-    "defaults": { "quality": 90, "strip_metadata": false },
-    "options": ["quality", "resize_mode", "max_dim"],
+    "engines": [
+      "libheif",
+      "vips",
+      "magick"
+    ],
+    "requires": [
+      "op:raster"
+    ],
+    "defaults": {
+      "quality": 90,
+      "strip_metadata": false
+    },
+    "options": [
+      "quality",
+      "resize_mode",
+      "max_dim"
+    ],
     "rank": 70,
     "note": "heif-convert writes only PNG and JPEG, so it is used for those two targets and libvips for the rest."
   },
@@ -41,12 +90,30 @@
     "id": "image-to-pdf",
     "label": "Image to PDF",
     "kind": "conversion",
-    "from": { "kind": "image" },
+    "from": {
+      "kind": "image"
+    },
     "to": "pdf",
-    "engines": ["magick", "orbit-native", "libreoffice"],
-    "requires": ["op:image_layout"],
-    "defaults": { "page": "a4", "margin": "0cm", "orientation": "auto", "quality": 85 },
-    "options": ["page", "margin", "orientation", "quality"],
+    "engines": [
+      "magick",
+      "orbit-native",
+      "libreoffice"
+    ],
+    "requires": [
+      "op:image_layout"
+    ],
+    "defaults": {
+      "page": "a4",
+      "margin": "0cm",
+      "orientation": "auto",
+      "quality": 85
+    },
+    "options": [
+      "page",
+      "margin",
+      "orientation",
+      "quality"
+    ],
     "rank": 45,
     "note": "One image on one page, at the page size and margin chosen. Several images dragged together become one multi-page PDF instead, through Merge."
   },
@@ -54,36 +121,76 @@
     "id": "pdf-to-image",
     "label": "PDF to image",
     "kind": "conversion",
-    "from": { "format": "pdf" },
+    "from": {
+      "format": "pdf"
+    },
     "to": "@writable:image",
-    "only": ["png", "jpg", "webp", "tiff", "avif"],
-    "engines": ["poppler", "magick", "ghostscript"],
-    "requires": ["op:pdf_render"],
-    "defaults": { "dpi": "150", "pdf_page": 1, "quality": 85 },
-    "options": ["dpi", "pdf_page", "quality"],
+    "only": [
+      "png",
+      "jpg",
+      "webp",
+      "tiff",
+      "avif"
+    ],
+    "engines": [
+      "poppler",
+      "magick",
+      "ghostscript"
+    ],
+    "requires": [
+      "op:pdf_render"
+    ],
+    "defaults": {
+      "dpi": "150",
+      "pages": "1-",
+      "quality": 85
+    },
+    "options": [
+      "dpi",
+      "pages",
+      "quality"
+    ],
     "rank": 50,
-    "note": "Renders one page as one image. Rendering a whole document as a series of images needs the series-output contract in M5; page lists and ranges are the extract-pages action's job."
+    "note": "Renders the chosen pages as a numbered series. A single page keeps the plain name; a range becomes scan (converted 001).png, 002, …"
   },
   {
     "id": "pdf-to-text",
     "label": "PDF to text",
     "kind": "conversion",
-    "from": { "format": "pdf" },
+    "from": {
+      "format": "pdf"
+    },
     "to": "txt",
-    "engines": ["poppler"],
-    "requires": ["op:pdf_text"],
-    "defaults": { "layout": true, "pages": "1-" },
-    "options": ["pages", "layout"],
+    "engines": [
+      "poppler"
+    ],
+    "requires": [
+      "op:pdf_text"
+    ],
+    "defaults": {
+      "layout": true,
+      "pages": "1-"
+    },
+    "options": [
+      "pages",
+      "layout"
+    ],
     "rank": 40
   },
   {
     "id": "pdf-to-docx",
     "label": "PDF to Word",
     "kind": "conversion",
-    "from": { "format": "pdf" },
+    "from": {
+      "format": "pdf"
+    },
     "to": "docx",
-    "engines": ["libreoffice"],
-    "requires": ["op:doc_convert"],
+    "engines": [
+      "libreoffice"
+    ],
+    "requires": [
+      "op:doc_convert"
+    ],
     "defaults": {},
     "options": [],
     "rank": 12,
@@ -93,24 +200,56 @@
     "id": "video-to-video",
     "label": "Video",
     "kind": "conversion",
-    "from": { "kind": "video" },
+    "from": {
+      "kind": "video"
+    },
     "to": "@writable:video",
-    "engines": ["ffmpeg"],
+    "engines": [
+      "ffmpeg"
+    ],
     "requires": [],
-    "defaults": { "codec": "h264", "crf": 23, "audio_codec": "aac", "audio_bitrate": "192000" },
-    "options": ["codec", "crf", "resolution", "audio_codec", "audio_bitrate", "strip_metadata"],
+    "defaults": {
+      "codec": "h264",
+      "crf": 23,
+      "audio_codec": "aac",
+      "audio_bitrate": "192000"
+    },
+    "options": [
+      "codec",
+      "crf",
+      "resolution",
+      "audio_codec",
+      "audio_bitrate",
+      "strip_metadata"
+    ],
     "rank": 45
   },
   {
     "id": "video-to-audio",
     "label": "Video to audio",
     "kind": "conversion",
-    "from": { "kind": "video" },
+    "from": {
+      "kind": "video"
+    },
     "to": "@writable:audio",
-    "engines": ["ffmpeg"],
-    "requires": ["op:extract_audio"],
-    "defaults": { "audio_bitrate": "192000", "normalize": false, "strip_metadata": true },
-    "options": ["audio_bitrate", "sample_rate", "channels", "normalize", "strip_metadata"],
+    "engines": [
+      "ffmpeg"
+    ],
+    "requires": [
+      "op:extract_audio"
+    ],
+    "defaults": {
+      "audio_bitrate": "192000",
+      "normalize": false,
+      "strip_metadata": true
+    },
+    "options": [
+      "audio_bitrate",
+      "sample_rate",
+      "channels",
+      "normalize",
+      "strip_metadata"
+    ],
     "rank": 38,
     "note": "Also the Extract > Audio action; it appears here so it is one gesture away."
   },
@@ -118,12 +257,32 @@
     "id": "video-to-gif",
     "label": "Video to GIF",
     "kind": "conversion",
-    "from": { "kind": "video" },
+    "from": {
+      "kind": "video"
+    },
     "to": "gif",
-    "engines": ["ffmpeg", "magick"],
-    "requires": ["op:palette", "op:resize"],
-    "defaults": { "start": 0, "duration": 5, "fps": 15, "width": 480, "loop": "forever" },
-    "options": ["start", "duration", "fps", "width", "loop"],
+    "engines": [
+      "ffmpeg",
+      "magick"
+    ],
+    "requires": [
+      "op:palette",
+      "op:resize"
+    ],
+    "defaults": {
+      "start": 0,
+      "duration": 5,
+      "fps": 15,
+      "width": 480,
+      "loop": "forever"
+    },
+    "options": [
+      "start",
+      "duration",
+      "fps",
+      "width",
+      "loop"
+    ],
     "rank": 55,
     "note": "Two-pass palette generation, which is why a 5 second GIF still looks clean."
   },
@@ -131,51 +290,108 @@
     "id": "video-to-frame-png",
     "label": "Video to still",
     "kind": "conversion",
-    "from": { "kind": "video" },
+    "from": {
+      "kind": "video"
+    },
     "to": "png",
-    "engines": ["ffmpeg"],
-    "requires": ["op:extract_frames"],
-    "defaults": { "time": 1 },
-    "options": ["time", "scale"],
+    "engines": [
+      "ffmpeg"
+    ],
+    "requires": [
+      "op:extract_frames"
+    ],
+    "defaults": {
+      "time": 1
+    },
+    "options": [
+      "time",
+      "scale"
+    ],
     "rank": 28,
-    "note": "One still, from the moment chosen. A run of frames is a series of files, which needs the series-output contract in M5."
+    "note": "One still at the chosen moment. The Frames from video action renders a numbered run instead."
   },
   {
     "id": "video-to-frame-jpg",
     "label": "Video to still (JPEG)",
     "kind": "conversion",
-    "from": { "kind": "video" },
+    "from": {
+      "kind": "video"
+    },
     "to": "jpg",
-    "engines": ["ffmpeg"],
-    "requires": ["op:extract_frames"],
-    "defaults": { "time": 1, "quality": 90 },
-    "options": ["time", "scale", "quality"],
+    "engines": [
+      "ffmpeg"
+    ],
+    "requires": [
+      "op:extract_frames"
+    ],
+    "defaults": {
+      "time": 1,
+      "quality": 90
+    },
+    "options": [
+      "time",
+      "scale",
+      "quality"
+    ],
     "rank": 20,
-    "note": "One still, from the moment chosen; the PNG version explains why a count is not offered yet."
+    "note": "One still at the chosen moment. The Frames from video action renders a numbered run instead."
   },
   {
     "id": "audio-to-audio",
     "label": "Audio",
     "kind": "conversion",
-    "from": { "kind": "audio" },
+    "from": {
+      "kind": "audio"
+    },
     "to": "@writable:audio",
-    "engines": ["ffmpeg"],
+    "engines": [
+      "ffmpeg"
+    ],
     "requires": [],
-    "defaults": { "audio_bitrate": "192000", "sample_rate": "source", "channels": "source" },
-    "options": ["audio_bitrate", "sample_rate", "channels", "normalize", "strip_metadata"],
+    "defaults": {
+      "audio_bitrate": "192000",
+      "sample_rate": "source",
+      "channels": "source"
+    },
+    "options": [
+      "audio_bitrate",
+      "sample_rate",
+      "channels",
+      "normalize",
+      "strip_metadata"
+    ],
     "rank": 60
   },
   {
     "id": "audio-to-video",
     "label": "Audio to video",
     "kind": "conversion",
-    "from": { "kind": "audio" },
+    "from": {
+      "kind": "audio"
+    },
     "to": "@writable:video",
-    "only": ["mp4", "webm", "mov", "mkv"],
-    "engines": ["ffmpeg"],
-    "requires": ["op:visualize"],
-    "defaults": { "visualize_mode": "waveform", "size": "1920x1080", "background": "#101014" },
-    "options": ["visualize_mode", "size", "background"],
+    "only": [
+      "mp4",
+      "webm",
+      "mov",
+      "mkv"
+    ],
+    "engines": [
+      "ffmpeg"
+    ],
+    "requires": [
+      "op:visualize"
+    ],
+    "defaults": {
+      "visualize_mode": "waveform",
+      "size": "1920x1080",
+      "background": "#101014"
+    },
+    "options": [
+      "visualize_mode",
+      "size",
+      "background"
+    ],
     "rank": 15,
     "note": "Draws a waveform, spectrum or embedded cover art on a video canvas, for podcasts and uploads."
   },
@@ -183,13 +399,34 @@
     "id": "image-to-video",
     "label": "Image to video",
     "kind": "conversion",
-    "from": { "kind": "image" },
+    "from": {
+      "kind": "image"
+    },
     "to": "@writable:video",
-    "only": ["mp4", "webm", "mov", "mkv"],
-    "engines": ["ffmpeg"],
-    "requires": ["op:slideshow"],
-    "defaults": { "duration": 5, "fps": 30, "codec": "h264", "resolution": "source" },
-    "options": ["duration", "fps", "codec", "resolution"],
+    "only": [
+      "mp4",
+      "webm",
+      "mov",
+      "mkv"
+    ],
+    "engines": [
+      "ffmpeg"
+    ],
+    "requires": [
+      "op:slideshow"
+    ],
+    "defaults": {
+      "duration": 5,
+      "fps": 30,
+      "codec": "h264",
+      "resolution": "source"
+    },
+    "options": [
+      "duration",
+      "fps",
+      "codec",
+      "resolution"
+    ],
     "rank": 10,
     "note": "Silent slideshow. Several images become one video in drag order."
   },
@@ -197,12 +434,38 @@
     "id": "document-to-pdf",
     "label": "Document to PDF",
     "kind": "conversion",
-    "from": { "any_of": [{ "kind": "document" }, { "kind": "text" }, { "kind": "data" }] },
+    "from": {
+      "any_of": [
+        {
+          "kind": "document"
+        },
+        {
+          "kind": "text"
+        },
+        {
+          "kind": "data"
+        }
+      ]
+    },
     "to": "pdf",
-    "engines": ["libreoffice"],
-    "requires": ["op:page_layout"],
-    "defaults": { "page": "a4", "margin": "2cm", "orientation": "auto", "toc": false },
-    "options": ["page", "margin", "orientation", "toc"],
+    "engines": [
+      "libreoffice"
+    ],
+    "requires": [
+      "op:page_layout"
+    ],
+    "defaults": {
+      "page": "a4",
+      "margin": "2cm",
+      "orientation": "auto",
+      "toc": false
+    },
+    "options": [
+      "page",
+      "margin",
+      "orientation",
+      "toc"
+    ],
     "rank": 55,
     "note": "Pandoc is not used for ->PDF because a usable PDF export would pull in a TeX engine."
   },
@@ -210,10 +473,24 @@
     "id": "markup-to-document",
     "label": "Markup to document",
     "kind": "conversion",
-    "from": { "any_of": [{ "format": "md" }, { "format": "html" }] },
+    "from": {
+      "any_of": [
+        {
+          "format": "md"
+        },
+        {
+          "format": "html"
+        }
+      ]
+    },
     "to": "@writable:document",
-    "engines": ["pandoc", "libreoffice"],
-    "requires": ["op:doc_convert"],
+    "engines": [
+      "pandoc",
+      "libreoffice"
+    ],
+    "requires": [
+      "op:doc_convert"
+    ],
     "defaults": {},
     "options": [],
     "rank": 45,
@@ -223,11 +500,30 @@
     "id": "document-to-document",
     "label": "Document",
     "kind": "conversion",
-    "from": { "any_of": [{ "kind": "document" }, { "kind": "text" }] },
+    "from": {
+      "any_of": [
+        {
+          "kind": "document"
+        },
+        {
+          "kind": "text"
+        }
+      ]
+    },
     "to": "@writable:document",
-    "only": ["docx", "odt", "rtf", "epub"],
-    "engines": ["libreoffice", "pandoc"],
-    "requires": ["op:doc_convert"],
+    "only": [
+      "docx",
+      "odt",
+      "rtf",
+      "epub"
+    ],
+    "engines": [
+      "libreoffice",
+      "pandoc"
+    ],
+    "requires": [
+      "op:doc_convert"
+    ],
     "defaults": {},
     "options": [],
     "rank": 35
@@ -236,10 +532,28 @@
     "id": "document-to-text",
     "label": "Document to text",
     "kind": "conversion",
-    "from": { "any_of": [{ "kind": "document" }, { "kind": "text" }, { "kind": "data" }] },
+    "from": {
+      "any_of": [
+        {
+          "kind": "document"
+        },
+        {
+          "kind": "text"
+        },
+        {
+          "kind": "data"
+        }
+      ]
+    },
     "to": "@writable:text",
-    "engines": ["libreoffice", "pandoc", "orbit-native"],
-    "requires": ["op:doc_convert"],
+    "engines": [
+      "libreoffice",
+      "pandoc",
+      "orbit-native"
+    ],
+    "requires": [
+      "op:doc_convert"
+    ],
     "defaults": {},
     "options": [],
     "rank": 30,
@@ -249,10 +563,24 @@
     "id": "markup-to-html",
     "label": "Markup to HTML",
     "kind": "conversion",
-    "from": { "any_of": [{ "format": "md" }, { "format": "txt" }] },
+    "from": {
+      "any_of": [
+        {
+          "format": "md"
+        },
+        {
+          "format": "txt"
+        }
+      ]
+    },
     "to": "html",
-    "engines": ["pandoc", "orbit-native"],
-    "requires": ["op:markup"],
+    "engines": [
+      "pandoc",
+      "orbit-native"
+    ],
+    "requires": [
+      "op:markup"
+    ],
     "defaults": {},
     "options": [],
     "rank": 40,
@@ -262,10 +590,16 @@
     "id": "html-to-markup",
     "label": "HTML to Markdown",
     "kind": "conversion",
-    "from": { "format": "html" },
+    "from": {
+      "format": "html"
+    },
     "to": "md",
-    "engines": ["pandoc"],
-    "requires": ["op:markup"],
+    "engines": [
+      "pandoc"
+    ],
+    "requires": [
+      "op:markup"
+    ],
     "defaults": {},
     "options": [],
     "rank": 40
@@ -274,13 +608,41 @@
     "id": "document-to-data",
     "label": "Table",
     "kind": "conversion",
-    "from": { "any_of": [{ "kind": "data" }, { "kind": "document" }] },
+    "from": {
+      "any_of": [
+        {
+          "kind": "data"
+        },
+        {
+          "kind": "document"
+        }
+      ]
+    },
     "to": "@writable:data",
-    "only": ["csv", "json", "yaml", "xlsx", "ods"],
-    "engines": ["orbit-native", "libreoffice"],
-    "requires": ["op:tabular_convert"],
-    "defaults": { "delimiter": ",", "header": true, "sheet": "1" },
-    "options": ["delimiter", "header", "sheet"],
+    "only": [
+      "csv",
+      "json",
+      "yaml",
+      "xlsx",
+      "ods"
+    ],
+    "engines": [
+      "orbit-native",
+      "libreoffice"
+    ],
+    "requires": [
+      "op:tabular_convert"
+    ],
+    "defaults": {
+      "delimiter": ",",
+      "header": true,
+      "sheet": "1"
+    },
+    "options": [
+      "delimiter",
+      "header",
+      "sheet"
+    ],
     "rank": 25,
     "note": "CSV, TSV and JSON are converted in-process by the built-in engine; YAML and spreadsheets go through Pandoc and LibreOffice."
   }

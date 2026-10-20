@@ -144,7 +144,63 @@ export type JobState =
   | { state: "queued" }
   | { state: "running"; percent?: number }
   | { state: "done"; path: string }
+  | { state: "done_series"; paths: string[] }
   | { state: "failed"; message: string }
   | { state: "cancelled" };
 
 export type JobEvent = { id: number; label: string } & JobState;
+
+/** One finished job, mirroring `orbit_jobs::HistoryEntry`. */
+export interface HistoryEntry {
+  /** Unix milliseconds when the job finished. */
+  at: number;
+  label: string;
+  action: string;
+  sources: string[];
+  outputs: string[];
+  ok: boolean;
+  message?: string;
+}
+
+/** A folder Orbit watches, and the rule applied to files that appear in it. */
+export interface WatchFolder {
+  path: string;
+  kind: string;
+  reference: string;
+  options: Record<string, unknown>;
+  enabled: boolean;
+}
+
+/** What the settings window renders, mirroring `SettingsView`. */
+export interface SettingsView {
+  hotkey: string | null;
+  hotkey_label: string;
+  hotkey_registered: boolean;
+  hotkey_note?: string;
+  hotkey_presets: Array<{ accelerator: string; label: string }>;
+  trigger: boolean;
+  trigger_listening: boolean;
+  trigger_note?: string;
+  output_dir: string | null;
+  onboarded: boolean;
+  watch: WatchFolder[];
+  history_path: string;
+  settings_path: string;
+  version: string;
+  wayland: boolean;
+}
+
+/** One entry in the watch-folder rule picker. */
+export interface WatchChoice {
+  kind: string;
+  reference: string;
+  label: string;
+  hint: string;
+}
+
+/** Whether Shift-drag is available, mirroring `trigger::TriggerStatus`. */
+export interface TriggerStatus {
+  enabled: boolean;
+  listening: boolean;
+  note?: string;
+}

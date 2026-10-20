@@ -24,17 +24,20 @@
 
 #![forbid(unsafe_code)]
 
+pub mod history;
 pub mod native;
 pub mod output;
 pub mod plan;
 pub mod resolve;
 pub mod runner;
 
+pub use history::{HistoryEntry, HistoryStore};
+
 pub use native::NativeError;
 pub use output::OutputPlan;
 pub use plan::{
     Backend, CommandSpec, JobRequest, NativeOp, Options, Plan, PlanError, ProgressMode, Resize,
-    Transform, plan,
+    SeriesPlan, StepRequest, Transform, plan,
 };
 pub use resolve::{Pick, PickKind, Resolution, ResolveError, Skipped, resolve_pick};
 pub use runner::{Job, JobEvent, JobId, JobState, Runner};

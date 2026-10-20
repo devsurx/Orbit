@@ -7,15 +7,15 @@
 Summon the ring, drop files on it, choose a radial petal, walk away. No
 drag-and-drop onto a tiny window, no "Save As" dialog, no upload, no account.
 
-<sub>🚧 The Shift-drag-anywhere trigger is M4; the ring, the engines and the drop
-target are already here.</sub>
+<sub>Shift-drag any file, pick a petal, and the result lands beside it. Local
+engines, no uploads, no account.</sub>
 
 <br />
 
 [![License: MPL 2.0](https://img.shields.io/badge/license-MPL%202.0-6e4aff.svg)](https://www.mozilla.org/en-US/MPL/2.0/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2ea043.svg)](#-platform-support)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-dea584.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-M3%20shipped-2ea043.svg)](#-roadmap)
+[![Status](https://img.shields.io/badge/status-v0.2.0-2ea043.svg)](#-roadmap)
 [![No telemetry](https://img.shields.io/badge/telemetry-none-2ea043.svg)](#-privacy)
 
 </div>
@@ -48,16 +48,20 @@ Grab an installer from [Releases](https://github.com/devsurx/Orbit/releases) —
 `.exe` or `.msi` on Windows, `.dmg` on macOS, `.AppImage`/`.deb`/`.rpm` on Linux —
 or [build from source](#-build-from-source).
 
+**Shift-drag a file** anywhere in the system and the ring appears under the
+pointer, already offering the actions that fit it. Pick a petal — *Convert →
+WebP*, *Compress*, *Trim* — and the result lands **next to the original** as
+`photo (converted).webp`. Nothing is overwritten, nothing is uploaded.
+
+No trigger to hand? Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> +
+<kbd>Space</kbd>, click the tray icon, or hand Orbit a file from the shell:
+
 ```bash
 orbit ~/Pictures/photo.png    # the ring opens under your cursor
+orbit convert --to webp ~/Pictures/*.png --out ~/Pictures/web
 ```
 
-Pick a petal — *Convert → WebP*, *Compress*, *Trim* — and the result lands
-**next to the original** as `photo (converted).webp`. Nothing is overwritten,
-nothing is uploaded, and `orbit --log` prints the path of every file Orbit has
-written.
-
-<sub>First time here? → [Build from source](#-build-from-source) · [The `orbit` command](#-the-orbit-command) · [Windows](#-windows)</sub>
+<sub>First time here? → [Build from source](#-build-from-source) · [Settings & history](#settings-history-and-watch-folders) · [The `orbit` command](#-the-orbit-command) · [Platform support](#️-platform-support)</sub>
 
 ---
 
@@ -71,11 +75,6 @@ metadata, merge a PDF, and more.
 It is **local-first**: everything runs on your machine through native engines
 you already trust (`FFmpeg`, ImageMagick, Ghostscript, …). Nothing is uploaded.
 
-> 🚧 Today the ring is summoned by hotkey, tray, compositor binding or
-> "Open with Orbit". The **Shift-drag-anywhere** trigger is the M4 milestone; the
-> drop target itself is already real and tested, which is what that milestone
-> has to hook into.
-
 > Run one action, or apply a preset to fifty files while you make coffee.
 
 ## 🎯 Highlights
@@ -83,7 +82,7 @@ you already trust (`FFmpeg`, ImageMagick, Ghostscript, …). Nothing is uploaded
 | | |
 |---|---|
 | 🖱️ **A real drop target** | The ring takes files the moment it is up; nothing to aim at. |
-| ⌨️ **Shift-drag-anywhere** | 🚧 M4 — the global trigger that summons the ring mid-drag. |
+| ⌨️ **Shift-drag-anywhere** | Hold Shift while dragging a file; the ring opens under the pointer without stealing the drag. |
 | 🧠 **Context-aware** | A `.mov` offers video petals; a folder of `.png` offers image tools. |
 | 🎛️ **Defaults that work, options when you want them** | Drop to run with sensible values; Alt-click or hold for the panel. |
 | 🔁 **841 conversion pairs** | Generated from a data-driven registry — add a format, not code. |
@@ -91,10 +90,12 @@ you already trust (`FFmpeg`, ImageMagick, Ghostscript, …). Nothing is uploaded
 | 🧰 **Editing, not just converting** | Resize, crop, trim, rotate, strip EXIF, compress, merge, split, OCR. |
 | 🔗 **Merge as one job** | Several images → one PDF or GIF; PDFs → one PDF; audio/video concatenated. |
 | ⚙️ **Batch & presets** | Name a workflow once, reuse it forever. |
-| 🗂️ **Watch folders** | Drop a file in a folder, get a converted one out. |
+| 🗂️ **Watch folders** | Point Orbit at a folder; new files are converted automatically, existing ones are left alone. |
 | 🔎 **OCR & documents** | Turn scans into text (images today); documents via LibreOffice/Pandoc. |
-| 📜 **History & undo tree** | Every job is recorded; revisit or re-run any step. |
-| ⌨️ **A hotkey you choose** | Pick one from the tray; it is remembered between launches. |
+| 📜 **History** | Every result is logged locally; the tray and settings show recent files and reveal them. |
+| ⌨️ **A hotkey you choose** | Pick one from the tray or settings; it is remembered between launches. |
+| 🧭 **A real settings window** | Trigger, output folder, watch folders and history, with a one-time welcome. |
+| 🖥️ **A headless CLI** | `orbit convert`, `action`, `preset`, `list`, `history` for scripts and cron. |
 | 🕵️ **Private by design** | Zero telemetry, zero network calls, no account, no cloud. |
 
 ## 🖥️ Platform support
@@ -105,15 +106,16 @@ by design, so we say so instead of shipping something flaky.
 
 | Platform | Shift-drag | Fallbacks | Notes |
 |---|---|---|---|
-| **Windows 10/11** | 🚧 M4 | hotkey · tray · Open with | Low-level mouse/keyboard hooks + drop overlay. |
-| **macOS 12+** | 🚧 M4 | hotkey · tray · Open with | `NSEvent` monitors; needs Accessibility permission. |
-| **Linux — X11** | 🚧 M4 | hotkey · tray · Open with | XInput2 / XRecord + XDND. |
+| **Windows 10/11** | ✅ | hotkey · tray · Open with | Low-level mouse/keyboard hooks; the window is non-activating until a file lands. |
+| **macOS 12+** | ✅ | hotkey · tray · Open with | Event taps; needs Accessibility permission the first time. |
+| **Linux — X11** | ✅ | hotkey · tray · Open with | XRecord through `rdev`, plus the real XDND drop target. |
 | **Linux — Wayland** | ⛔ | tray · Open with · compositor binding | No global Shift-drag **and no in-app hotkey** — see below. |
 
-> ✅ **What works on every platform today:** the overlay is a real drop target,
-> the global hotkey (where the OS delivers one), the tray icon, and handing files
-> to Orbit from the shell — `orbit-app photo.png` selects them and opens the ring.
-> That last route is the same one "Open with Orbit" and "Send to" use.
+> ✅ **What works on every platform:** the overlay is a real drop target, the
+> tray icon, the settings window, and handing files to Orbit from the shell —
+> `orbit-app photo.png` selects them and opens the ring. That last route is the
+> same one "Open with Orbit" and "Send to" use. Shift-drag and the global hotkey
+> work wherever the OS allows a background app to observe input.
 
 > 🐧 **Linux and ImageMagick.** The image pipeline is built on ImageMagick **7**
 > (`magick`). Debian 13, Fedora and Arch ship it; Ubuntu LTS still ships
@@ -122,11 +124,14 @@ by design, so we say so instead of shipping something flaky.
 > ImageMagick 7, or install `libvips-tools` — vips is the preferred image engine
 > anyway — and the built-in engine covers the basic raster work either way.
 
-> ⚠️ **Wayland has no global hotkey path at all.** Orbit's hotkey goes through
-> `XGrabKey`, which Wayland deliberately makes inert: the compositor owns input,
-> and XWayland only sees events for the focused X11 window. The grab even
-> *succeeds*, so the failure is silent — Orbit prints a note at startup rather
-> than leaving you pressing keys at nothing.
+> ⚠️ **Wayland has no global hotkey and no global Shift-drag.** The compositor
+> owns input, and a client cannot observe a drag that started in another
+> application. Orbit reports both as unavailable in **Settings → General** and
+> prints a note at startup rather than leaving you pressing keys or holding
+> Shift at nothing. Bind the launcher in your compositor instead (below). The
+> ring also cannot be centred on the pointer, because a Wayland client cannot
+> read the global pointer: the compositor places the window (usually centre).
+> The tray, `Open with Orbit` and the settings window all still work.
 
 ### ⌨️ Choosing the shortcut
 
@@ -185,7 +190,7 @@ Two installers, both built by CI on a real Windows runner:
 
 **WebView2** is what draws the ring. Windows 11 has it; Windows 10 usually does
 (Edge installs it). If it is missing, the installer fetches the bootstrapper from
-Microsoft — the only network access Orbit or its installer ever performs, and it
+Microsoft — the only network access the installer ever performs, and it
 is the runtime, not the app.
 
 **Getting files to it.** The ring is a drop target, so once it is up you can drop
@@ -212,9 +217,22 @@ Orbit.exe --hotkey=off
 > `x86_64-pc-windows-msvc`**, which is what catches a stray Unix-only call or a
 > missing `cfg` — CI runs that check on every push, from Linux. The installers
 > themselves are built by the `installers` job on `windows-latest`, so they come
-> out of the real toolchain rather than a cross-compile. What cannot be verified
-> outside Windows is *runtime* behaviour: the tray menu, the hotkey, and the ring
-> on your desktop. That is the honest state of it, and why M4 is next.
+> out of the real toolchain rather than a cross-compile. The Shift-drag hook is
+> implemented against the Windows low-level input API, but *runtime* behaviour
+> — the tray menu, the hook and the ring on your desktop — can only be verified
+> on Windows. If something there misbehaves, an issue with the app log is the
+> fastest path to a fix.
+
+### 🍎 macOS
+
+Shift-drag and the global shortcut need **Accessibility** permission, because
+macOS treats global input as a privileged capability. The first time Orbit asks,
+allow it in **System Settings → Privacy & Security → Accessibility**; if the
+prompt was dismissed, add the app there manually. Without it the tray, drop
+target, settings window and `Open with Orbit` all still work.
+
+The DMG contains separate Apple-silicon and Intel builds. Nothing is notarised
+yet, so the first launch may need **Open** from the context menu in Finder.
 
 ### 🤫 Known limitation: translucent windows on Linux
 
@@ -250,17 +268,61 @@ screen, and <kbd>Esc</kbd> closes the panel without running anything.
 | Petal | What the panel unlocks |
 |---|---|
 | Convert → PDF (image) | Paper size, margin, orientation, quality |
-| PDF → image | DPI, which page, quality |
+| PDF → image | DPI, pages (a range becomes a numbered series), quality |
+| Extract frames | Frame step, frame limit, quality |
 | Merge | Result (PDF / GIF / MP4 / MP3), order (as dragged / by name / oldest first) |
 | Extract pages | `1-3` or `2-` — the range is written into one PDF |
 | Crop | `left,top,width,height`, or ImageMagick's `WxH+X+Y` |
 | OCR | Language and output format |
 
-> 📄 **One page at a time, for now.** Rendering a *range* of PDF pages as a
-> series of images — or a run of video frames — needs the series-output contract
-> that lands in M5. Today `PDF → image` renders the page you choose, and
-> `Extract pages` writes the chosen range into a single PDF. The registry says so
-> in the petal's note rather than pretending otherwise.
+> 📄 **Ranges become series.** `PDF → image` with `pages=1-3` writes
+> `scan (page 001).png`, `scan (page 002).png`, …; `Extract frames` with
+> `frame_step=5` writes `clip (frame 001).png`, … A single page keeps the plain
+> `scan (page).png` name. The whole run is reserved as a block, so no name can
+> collide with an existing file, and intermediates are cleaned up on failure.
+>
+> 🔗 **Presets are chains.** A preset is a sequence of resolved steps with hidden
+> scratch files between them; only the last step is published. The registry's
+> `chains.json` is the data, and the CLI exposes the same chains.
+
+## Settings, history and watch folders
+
+Click **Settings** in the ring, choose **Settings…** from the tray, or let the
+one-time welcome open it on first run. It is a normal window, not the ring, so
+the long-form things have room:
+
+- **Shift-drag** — on or off. On Wayland the toggle is disabled and the window
+  explains why.
+- **Global shortcut** — the same presets as the tray, applied immediately.
+- **Output folder** — leave it empty to write beside each source, or pick a
+  folder (the picker is native). Results keep their `name (converted).ext`
+  convention either way.
+- **Watch folders** — a folder, plus one rule: an action, a preset, or a target
+  format. Existing files are only memorised; files that appear later are queued.
+  A folder is scanned every two seconds, subfolders three levels deep, and a file
+  must be two seconds old before it is picked up — so a copy that is still
+  running is not grabbed halfway through. Orbit also ignores paths it just
+  published, which is what stops a result written back into the watched folder
+  from triggering another conversion.
+- **History** — the newest 100 jobs, with **Show** to reveal a result in the file
+  manager, and **Clear history** to forget them.
+
+The settings document is written atomically to the app config directory
+(`~/.config/app.orbit.desktop/settings.json` on Linux,
+`~/Library/Application Support/app.orbit.desktop/` on macOS,
+`%APPDATA%\app.orbit.desktop\` on Windows). History is a separate, append-only
+JSONL file under the state directory:
+
+| Platform | History |
+|---|---|
+| Linux | `~/.local/state/orbit/history.jsonl` |
+| macOS | `~/Library/Application Support/Orbit/history.jsonl` |
+| Windows | `%LOCALAPPDATA%\Orbit\history.jsonl` |
+
+`ORBIT_HISTORY=/some/path.jsonl` overrides it, for tests and for people who keep
+their state elsewhere. History is a convenience, never a source of truth: a line
+truncated by a crash costs one entry, not the log, and the files themselves are
+always the record. Nothing in either file leaves the machine.
 
 ## 🚀 Build from source
 
@@ -274,7 +336,7 @@ webview/Tauri dependencies.
 sudo apt-get update
 sudo apt-get install -y \
   libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-  librsvg2-dev libxdo-dev patchelf
+  librsvg2-dev libxtst-dev libxi-dev patchelf
 ```
 </details>
 
@@ -349,6 +411,32 @@ published file — by absolute path — to `~/.local/state/orbit/jobs.log`. That
 is the durable answer to *"where did my file go?"*; the ring only says it for a
 second or so. It is local, created only by this launcher, and safe to delete.
 
+The launcher also delegates headless commands to `orbit-cli`, so scripts and cron
+jobs can use the same registry and the same defaults the ring uses:
+
+```bash
+orbit convert --to webp photo.png                 # beside the source
+orbit convert --to png scan.pdf --option pages=1-3
+orbit action extract_frames clip.mp4 --option frame_step=5
+orbit preset web-ready *.jpg --out ~/Pictures/web
+orbit list formats                                # what can be written
+orbit history --limit 20                          # the same log the window shows
+```
+
+`--option key=value` uses exactly the keys the options panel shows (`orbit list
+actions` prints them), and `--json` makes `list` and `history` script-friendly.
+The GUI and the CLI share the resolver and the engines; a pick that is disabled
+in the ring is refused by the CLI with the same reason.
+
+## 🧩 First run
+
+The first launch opens **Settings → General** with a short welcome. It says the
+three things that make Orbit make sense: how to summon it, where results go, and
+that nothing leaves the machine. **Got it** dismisses it for good; **Set up a
+watch folder** jumps straight to the folder editor. The welcome is not a modal
+and it does not block the ring: if you would rather just use the app, close the
+window and press the shortcut.
+
 > ⚠️ **`--features custom-protocol` is not optional for a real binary.** Without
 > it Tauri builds in *dev mode* and loads `devUrl` (`http://localhost:1420`), so
 > you get a window with nothing in it unless the Vite dev server happens to be
@@ -413,8 +501,10 @@ petal pick ─▶ resolve ─▶ plan ─▶ worker pool ─▶ publish ─▶ o
   | Audio from video | `clip (audio).mp3` |
   | Trim | `clip (trimmed).mp4` |
 
-- **Where it went:** always next to the source file. `orbit --log` prints the
-  paths of everything Orbit has published, if you would rather not go looking.
+- **Where it went:** beside the source, or in the output folder you chose in
+  settings. `orbit --log` prints the paths of everything Orbit has published, if
+  you would rather not go looking; the tray and settings history keep the recent
+  ones.
 - **An existing file is never overwritten.** If the name is taken you get
   `photo (converted 2).webp`, and the original bytes are untouched.
 - **Writes are atomic.** The result is built as a hidden `.orbit-*` scratch file
@@ -477,18 +567,23 @@ Orbit/
 │   │   ├── src/
 │   │   ├── tests/
 │   │   └── examples/menu.rs  #    dev tool: "what does a .mov offer?"
-│   ├── orbit-jobs/           # ⚙️  resolve · plan · run · publish        (M2–M3)
+│   ├── orbit-jobs/           # ⚙️  resolve · plan · run · publish
 │   │   ├── src/resolve.rs    #    petal pick  →  concrete JobRequests
 │   │   ├── src/plan.rs       #    JobRequest  →  argv / native op (pure)
 │   │   ├── src/native.rs     #    the engine that is not a process
 │   │   ├── src/output.rs     #    naming, scratch files, atomic publish
-│   │   └── src/runner.rs     #    worker pool, cancellation, progress
-│   ├── orbit-app/            # 🪟 Tauri shell: tray, hotkey, overlay, pool (M1–M3)
-│   └── orbit-cli/            # ⌨️  headless `orbit convert …`            (M5)
+│   │   ├── src/runner.rs     #    worker pool, chains, cancellation, progress
+│   │   └── src/history.rs    #    append-only JSONL log, compaction
+│   ├── orbit-app/            # 🪟 Tauri shell, tray, hotkey, overlay
+│   │   ├── src/trigger.rs    #    Shift-drag detector + global input listener
+│   │   ├── src/settings.rs   #    persisted settings, hotkey presets
+│   │   ├── src/watch.rs      #    watch-folder scanner and queueing
+│   │   └── src/main.rs       #    commands, tray, dispatch, single instance
+│   └── orbit-cli/            # ⌨️  headless `orbit convert …`
 ├── scripts/orbit             # ⌨️  `orbit [file …]` launcher + job log
 ├── scripts/windows/          # 🪟  "Send to → Orbit" installer
 ├── .github/workflows/        # 📦  CI on every push, installers on every tag
-└── src/                      # ⚛️  React + Vite + Tailwind radial UI      (M1–M3)
+└── src/                      # ⚛️  React + Vite + Tailwind radial UI
 ```
 
 ## 📦 Building installers
@@ -515,7 +610,7 @@ cargo check -p orbit-app --target x86_64-pc-windows-msvc --features custom-proto
 | [`release.yml`](.github/workflows/release.yml) | a `v*` tag, or manually | builds the installers on all three platforms and files them under a **draft** release, so the notes can be read before anything ships. |
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 ## 🗺️ Roadmap
@@ -525,21 +620,37 @@ git tag v0.1.0 && git push origin v0.1.0
 | **M1** | Tray app, global hotkey, transparent overlay, radial menu UI | ✅ shipped |
 | **M2** | Job runner, worker pool, image & audio conversion | ✅ shipped |
 | **M3** | Options panel, PDF/document/OCR engines, merging, native engine, choosable hotkey | ✅ shipped |
-| **M4a** | **Windows**: installers, CI, Send to, Windows-target verification | 🚚 shipping |
-| **M4b** | Per-OS Shift-drag trigger and shell integration (Windows · macOS · X11) | ⏳ next |
-| **M5** | Series output (page/frame runs), presets, history, watch folders, CLI | ⏳ planned |
-| **M6** | Onboarding, settings surface, polish | ⏳ planned |
+| **M4a** | **Windows**: installers, CI, Send to, Windows-target verification | ✅ shipped |
+| **M4b** | Per-OS Shift-drag trigger and shell integration (Windows · macOS · X11) | ✅ shipped |
+| **M5** | Series output (page/frame runs), presets, history, watch folders, CLI | ✅ shipped |
+| **M6** | Onboarding, settings surface, polish | ✅ shipped |
 
-Windows ships *before* the Shift-drag trigger on purpose: the trigger is a small
-per-OS piece of input plumbing, while everything behind it — the registry, the
-engines, the options panel, the worker pool — is the same code everywhere.
-Shipping the installers first leaves one feature of Windows-specific work rather
-than a port.
+### What is next
+
+- **Optional update check** — user-triggered, off by default, the only network
+  call the app would ever make.
+- **PDF OCR** — the text layer path is designed, but it needs a page rasteriser
+  and a round-trip to Tesseract that is honest about mixed results.
+- **Re-run from history** — the log already carries the action and sources; the
+  UI to put them back on the ring is the missing piece.
+- **More registry data** — the matrix is generated, so new formats and actions
+  are JSON, not code. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+### Verification, honestly
+
+Linux is where this release has been run end-to-end against real engines. The
+Windows and macOS applications type-check against their targets on every push,
+and their installers are built on the real operating systems by CI — but the
+Shift-drag hook, the tray and the native folder picker cannot be *runtime*-tested
+from Linux. The release notes say so, and issue reports from those platforms are
+the fastest way to close the gap.
 
 ## 🔒 Privacy
 
-No telemetry. No analytics. No network calls except an **optional, user-triggered**
-update check. Your files never leave your machine.
+No telemetry. No analytics. No accounts. No network calls at all today — not
+even an update check. When the optional update check lands it will be off by
+default, user-triggered and the only request the app ever makes. Your files never
+leave your machine.
 
 ## 🤝 Contributing
 

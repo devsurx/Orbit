@@ -34,6 +34,8 @@ Direct dependencies only; the full transitive set is pinned in
 | [`tauri`](https://crates.io/crates/tauri) | MIT OR Apache-2.0 | The application shell, tray, window and webview |
 | [`tauri-plugin-global-shortcut`](https://crates.io/crates/tauri-plugin-global-shortcut) | MIT OR Apache-2.0 | The configurable global shortcut |
 | [`tauri-plugin-single-instance`](https://crates.io/crates/tauri-plugin-single-instance) | MIT OR Apache-2.0 | Handing a second launch to the running instance |
+| [`tauri-plugin-dialog`](https://crates.io/crates/tauri-plugin-dialog) | MIT OR Apache-2.0 | The native folder picker in settings |
+| [`rdev`](https://crates.io/crates/rdev) | MIT | The global Shift-drag input listener (X11, Windows, macOS) |
 
 `image` is configured without its default features, so the decoder and encoder
 set is exactly PNG, JPEG, BMP and TIFF — the formats the built-in engine
@@ -49,6 +51,7 @@ implements.
 | [`tailwindcss`](https://www.npmjs.com/package/tailwindcss) | MIT | Styling (build time only) |
 | [`typescript`](https://www.npmjs.com/package/typescript) | Apache-2.0 | Types (build time only) |
 | [`@tauri-apps/cli`](https://www.npmjs.com/package/@tauri-apps/cli) | Apache-2.0 OR MIT | `tauri build` / `tauri dev` (build time only) |
+| [`@tauri-apps/plugin-dialog`](https://www.npmjs.com/package/@tauri-apps/plugin-dialog) | Apache-2.0 OR MIT | The folder picker, from the settings window |
 | [`postcss`](https://www.npmjs.com/package/postcss) · [`autoprefixer`](https://www.npmjs.com/package/autoprefixer) | MIT | CSS pipeline (build time only) |
 | [`@vitejs/plugin-react`](https://www.npmjs.com/package/@vitejs/plugin-react) | MIT | React fast refresh (build time only) |
 
@@ -59,6 +62,7 @@ implements.
 | **WebView2** (Windows) | Microsoft proprietary, redistributable | Ships with Windows 11; the installer fetches the bootstrapper if it is missing. |
 | **WebKitGTK** (Linux) | LGPL-2.1-or-later | A system package (`libwebkit2gtk-4.1-0`), declared by the `.deb`. |
 | **WebKit** (macOS) | System framework | Part of macOS. |
+| **X11 client libraries** (Linux) | MIT | `libX11`, `libXtst` and `libXi`; declared by the `.deb`. The Shift-drag listener uses XRecord through `rdev`. |
 
 ---
 

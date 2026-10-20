@@ -209,6 +209,55 @@ pub enum Backend {
     Process(CommandSpec),
     /// Run in-process, in Rust.
     Native(NativeOp),
+    /// Run several backends in order, each one reading the previous result.
+    Chain(Vec<PlannedStep>),
+}
+
+/// One link of a chain: what to run and where its result belongs.
+#[derive(Debug, Clone)]
+pub struct PlannedStep {
+    /// The process or native operation.
+    pub backend: Backend,
+    /// File this step must write; the next step reads it.
+    pub output: PathBuf,
+}
+
+/// A run of files written by one engine invocation.
+///
+/// The engine writes `<prefix>-1.<ext>`, `<prefix>-2.<ext>`, …; the runner
+/// renames them to the user-facing series (`scan (converted 001).png`) only
+/// once the engine has exited successfully.
+#[derive(Debug, Clone)]
+pub struct SeriesPlan {
+    /// Path before the engine's number and extension.
+    pub prefix: PathBuf,
+    /// Extension the run carries, without the dot.
+    pub ext: String,
+    /// Word used in the published names.
+    pub tag: String,
+}
+
+/// One step of a chain or preset.
+///
+/// A step is everything a [`JobRequest`] is except the files: the resolver works
+/// out each step's engine and extension before the planner builds the command
+/// lines, because step *n+1* reads what step *n* writes.
+#[derive(Debug, Clone)]
+pub struct StepRequest {
+    /// Engine id, which decides *how* the command is built.
+    pub engine: String,
+    /// Executable to run.
+    pub program: PathBuf,
+    /// Family of the step's input.
+    pub kind: Kind,
+    /// Action id, or `convert`.
+    pub action: String,
+    /// Extension this step writes.
+    pub target_ext: String,
+    /// Word used in the output name; only the last step's matters.
+    pub tag: String,
+    /// Values for this step.
+    pub options: Options,
 }
 
 /// Everything the planner needs, already resolved against the registry.
@@ -220,7 +269,7 @@ pub struct JobRequest {
     pub program: PathBuf,
     /// Family of the first source file.
     pub kind: Kind,
-    /// `convert`, or an action id from `registry/actions.json`.
+    /// `convert`, an action id, or `chain` for a preset.
     pub action: String,
     /// Extension the result should carry, without the dot.
     pub target_ext: String,
@@ -232,6 +281,8 @@ pub struct JobRequest {
     pub options: Options,
     /// Where to write, when the user has chosen a folder.
     pub output_dir: Option<PathBuf>,
+    /// Steps of a chain, in order. Empty for a single-action job.
+    pub steps: Vec<StepRequest>,
 }
 
 /// A request plus the plan it produced.
@@ -241,6 +292,10 @@ pub struct Plan {
     pub backend: Backend,
     /// The reserved destination and scratch file.
     pub output: OutputPlan,
+    /// Set when the backend writes a numbered run instead of one file.
+    pub series: Option<SeriesPlan>,
+    /// Intermediate files a chain writes; removed however the job ends.
+    pub temps: Vec<PathBuf>,
 }
 
 /// Why a request could not become a command line.
@@ -316,6 +371,9 @@ pub enum PlanError {
 /// file count that a plain drop did not supply, when the engine is not driven
 /// for that action yet, or when the output name cannot be reserved.
 pub fn plan(request: &JobRequest) -> Result<Plan, PlanError> {
+    if !request.steps.is_empty() {
+        return plan_chain(request);
+    }
     let Some(first) = request.sources.first() else {
         return Err(PlanError::NoInput);
     };
@@ -327,8 +385,125 @@ pub fn plan(request: &JobRequest) -> Result<Plan, PlanError> {
         request.output_dir.as_deref(),
     )?;
 
+    let series = series_for(request, output.scratch_path())?;
     let backend = backend(request, output.scratch_path())?;
-    Ok(Plan { backend, output })
+    Ok(Plan {
+        backend,
+        output,
+        series,
+        temps: Vec::new(),
+    })
+}
+
+/// Build the command lines for a chain, feeding each step's output to the next.
+///
+/// Only the final step writes to the reserved destination; the earlier ones
+/// write hidden siblings that [`Plan::temps`] has removed however the job ends.
+fn plan_chain(request: &JobRequest) -> Result<Plan, PlanError> {
+    let Some(first) = request.sources.first() else {
+        return Err(PlanError::NoInput);
+    };
+    let output = OutputPlan::reserve(
+        first,
+        &request.tag,
+        &request.target_ext,
+        request.output_dir.as_deref(),
+    )?;
+
+    let last = request.steps.len().saturating_sub(1);
+    let mut backends = Vec::with_capacity(request.steps.len());
+    let mut temps = Vec::new();
+    let mut input = first.clone();
+
+    for (index, step) in request.steps.iter().enumerate() {
+        let output_path = if index == last {
+            output.scratch_path().to_path_buf()
+        } else {
+            let path = output
+                .scratch_sibling(&format!("step{index}"))
+                .with_extension(&step.target_ext);
+            temps.push(path.clone());
+            path
+        };
+        let step_request = JobRequest {
+            engine: step.engine.clone(),
+            program: step.program.clone(),
+            kind: step.kind,
+            action: step.action.clone(),
+            target_ext: step.target_ext.clone(),
+            tag: step.tag.clone(),
+            sources: vec![input],
+            options: step.options.clone(),
+            output_dir: None,
+            steps: Vec::new(),
+        };
+        backends.push(PlannedStep {
+            backend: backend(&step_request, &output_path)?,
+            output: output_path.clone(),
+        });
+        input = output_path;
+    }
+
+    Ok(Plan {
+        backend: Backend::Chain(backends),
+        output,
+        series: None,
+        temps,
+    })
+}
+
+/// Whether this request writes a numbered run, and where.
+fn series_for(request: &JobRequest, scratch: &Path) -> Result<Option<SeriesPlan>, PlanError> {
+    let prefix = without_extension(scratch);
+    if request.action == "extract_frames" {
+        return Ok(Some(SeriesPlan {
+            prefix,
+            ext: request.target_ext.clone(),
+            tag: request.tag.clone(),
+        }));
+    }
+    if request.action == "convert"
+        && request.kind == Kind::Pdf
+        && matches!(
+            request.target_ext.as_str(),
+            "png" | "jpg" | "tiff" | "webp" | "avif"
+        )
+        && pdf_range(request)?.is_some()
+    {
+        return Ok(Some(SeriesPlan {
+            prefix,
+            ext: request.target_ext.clone(),
+            tag: request.tag.clone(),
+        }));
+    }
+    Ok(None)
+}
+
+/// The page range a PDF render should cover, when it covers more than one page.
+///
+/// `Ok(None)` means one page: either no range was chosen or it names a single
+/// page. A list such as `1-3,7` is refused, because the renderers cannot express
+/// it in one pass and silently rendering less would be worse.
+fn pdf_range(request: &JobRequest) -> Result<Option<(u32, Option<u32>)>, PlanError> {
+    let Some(text) = opt_str(&request.options, "pages").filter(|text| !text.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some((first, last)) = contiguous_range(&text) else {
+        return Err(PlanError::ValueUnsupported {
+            action: request.action.clone(),
+            engine: if request.engine == "poppler" {
+                "poppler"
+            } else if request.engine == "magick" {
+                "magick"
+            } else {
+                "ghostscript"
+            },
+            option: "pages".to_owned(),
+            value: text,
+        });
+    };
+    Ok((last != Some(first)).then_some((first, last)))
 }
 
 /// Dispatch to the engine that was chosen for this job.
@@ -376,6 +551,15 @@ fn without_extension(scratch: &Path) -> PathBuf {
     }
 }
 
+/// ffmpeg's image2 muxer takes a pattern, not a path: `%04d` is replaced with
+/// the frame number.
+fn frame_pattern(scratch: &Path) -> OsString {
+    let ext = scratch
+        .extension()
+        .map_or_else(String::new, |ext| ext.to_string_lossy().into_owned());
+    format!("{}-%04d.{ext}", without_extension(scratch).display()).into()
+}
+
 fn unsupported(action: &str, engine: &str, milestone: &'static str) -> PlanError {
     PlanError::NotYetSupported {
         action: action.to_owned(),
@@ -399,7 +583,7 @@ fn build_magick(request: &JobRequest, scratch: &Path) -> Result<CommandSpec, Pla
         }
         // ImageMagick addresses PDF pages with a bracketed index before the
         // file name, and decodes at the density in force when it reads.
-        ("convert", Kind::Pdf) => return Ok(magick_pdf_render(request, scratch)),
+        ("convert", Kind::Pdf) => return magick_pdf_render(request, scratch),
         ("convert", Kind::Image) if is_svg(&request.sources[0]) => {
             return Ok(magick_vector(request, scratch));
         }
@@ -511,19 +695,38 @@ fn magick_image_to_pdf(request: &JobRequest, scratch: &Path) -> CommandSpec {
 }
 
 /// One page of a PDF, at the requested resolution.
-fn magick_pdf_render(request: &JobRequest, scratch: &Path) -> CommandSpec {
+fn magick_pdf_render(request: &JobRequest, scratch: &Path) -> Result<CommandSpec, PlanError> {
     let options = &request.options;
-    let page = opt_i64(options, "pdf_page").unwrap_or(1).max(1);
     let dpi = opt_str(options, "dpi").unwrap_or_else(|| "150".to_owned());
     let input = request.sources[0].display();
 
     let mut args: Vec<OsString> = Vec::new();
     push_flag(&mut args, "-density", &dpi);
-    // Zero-based: the panel counts pages from one, ImageMagick from zero.
-    args.push(format!("{input}[{}]", page - 1).into());
     push_quality(&mut args, options);
-    args.push(scratch.into());
-    CommandSpec::plain(request.program.clone(), args, ProgressMode::None)
+
+    if let Some((first, last)) = pdf_range(request)? {
+        // Zero-based, and `first-` means "through the last page".
+        let range = match last {
+            Some(last) => format!("{}-{}", first - 1, last - 1),
+            None => format!("{}-", first - 1),
+        };
+        args.push(format!("{input}[{range}]").into());
+        let ext = scratch
+            .extension()
+            .map_or_else(String::new, |ext| ext.to_string_lossy().into_owned());
+        args.push(format!("{}-%03d.{ext}", without_extension(scratch).display()).into());
+    } else {
+        // Zero-based: the panel counts pages from one, ImageMagick from zero.
+        let page = single_page(request);
+        args.push(format!("{input}[{}]", page - 1).into());
+        args.push(scratch.into());
+    }
+
+    Ok(CommandSpec::plain(
+        request.program.clone(),
+        args,
+        ProgressMode::None,
+    ))
 }
 
 /// A vector source rasterised at the requested scale.
@@ -797,8 +1000,19 @@ fn build_ffmpeg(request: &JobRequest, scratch: &Path) -> Result<CommandSpec, Pla
         args.push(chain.into());
     }
 
+    if action == "extract_frames" {
+        let limit = opt_i64(options, "frame_limit")
+            .unwrap_or(100)
+            .clamp(1, 100_000);
+        push_flag(&mut args, "-frames:v", &limit.to_string());
+    }
+
     push_progress(&mut args);
-    args.push(scratch.into());
+    if action == "extract_frames" {
+        args.push(frame_pattern(scratch));
+    } else {
+        args.push(scratch.into());
+    }
 
     let mut spec = CommandSpec::plain(request.program.clone(), args, ProgressMode::FfmpegKeyValue);
     spec.media_input = Some(input.clone());
@@ -1039,7 +1253,10 @@ fn push_ffmpeg_action(
         }
         "extract_audio" => push_audio_encoding(args, options),
         "extract_frames" => {
-            push_flag(args, "-frames:v", "1");
+            // A run of stills: the fps filter thins the stream, and the builder
+            // caps the count so a two-hour film cannot fill a disk by accident.
+            let step = opt_f64(options, "frame_step").unwrap_or(1.0).max(0.01);
+            filters.push(format!("fps={}", (1.0 / step).max(0.001)));
             let scale = opt_f64(options, "scale").unwrap_or(1.0);
             if (scale - 1.0).abs() > f64::EPSILON {
                 filters.push(format!("scale=iw*{scale}:ih*{scale}"));
@@ -1213,7 +1430,7 @@ fn fit_within(box_geometry: &str) -> String {
 fn build_poppler(request: &JobRequest, scratch: &Path) -> Result<CommandSpec, PlanError> {
     match request.target_ext.as_str() {
         "txt" => poppler_text(request, scratch),
-        ext @ ("png" | "jpg" | "tiff") => Ok(poppler_render(request, scratch, ext)),
+        ext @ ("png" | "jpg" | "tiff") => poppler_render(request, scratch, ext),
         other => Err(PlanError::ValueUnsupported {
             action: request.action.clone(),
             engine: "poppler",
@@ -1255,8 +1472,12 @@ fn poppler_text(request: &JobRequest, scratch: &Path) -> Result<CommandSpec, Pla
     ))
 }
 
-/// One page of a PDF as an image.
-fn poppler_render(request: &JobRequest, scratch: &Path, ext: &str) -> CommandSpec {
+/// One page of a PDF as an image, or a numbered run when a range is chosen.
+fn poppler_render(
+    request: &JobRequest,
+    scratch: &Path,
+    ext: &str,
+) -> Result<CommandSpec, PlanError> {
     let options = &request.options;
     let mut args: Vec<OsString> = Vec::new();
     args.push(
@@ -1275,14 +1496,40 @@ fn poppler_render(request: &JobRequest, scratch: &Path, ext: &str) -> CommandSpe
             push_flag(&mut args, "-jpegopt", &format!("quality={quality}"));
         }
     }
-    let page = opt_i64(options, "pdf_page").unwrap_or(1).max(1);
-    push_flag(&mut args, "-f", &page.to_string());
-    push_flag(&mut args, "-l", &page.to_string());
-    // One page in, one file out, named exactly as asked.
-    args.push("-singlefile".into());
-    args.push(request.sources[0].clone().into_os_string());
-    args.push(without_extension(scratch).into_os_string());
-    CommandSpec::plain(request.program.clone(), args, ProgressMode::None)
+    if let Some((first, last)) = pdf_range(request)? {
+        push_flag(&mut args, "-f", &first.to_string());
+        if let Some(last) = last {
+            push_flag(&mut args, "-l", &last.to_string());
+        }
+        // No `-singlefile`: poppler appends `-1.png`, `-2.png`, … to the
+        // prefix, and the runner publishes the run under Orbit's names.
+        args.push(request.sources[0].clone().into_os_string());
+        args.push(without_extension(scratch).into_os_string());
+    } else {
+        let page = single_page(request);
+        push_flag(&mut args, "-f", &page.to_string());
+        push_flag(&mut args, "-l", &page.to_string());
+        args.push("-singlefile".into());
+        args.push(request.sources[0].clone().into_os_string());
+        args.push(without_extension(scratch).into_os_string());
+    }
+    Ok(CommandSpec::plain(
+        request.program.clone(),
+        args,
+        ProgressMode::None,
+    ))
+}
+
+/// The one page a single-page render should use.
+fn single_page(request: &JobRequest) -> u32 {
+    let named = opt_str(&request.options, "pages")
+        .and_then(|text| contiguous_range(&text))
+        .and_then(|(first, last)| (last == Some(first)).then_some(first));
+    named
+        .or_else(|| {
+            opt_i64(&request.options, "pdf_page").and_then(|page| u32::try_from(page.max(1)).ok())
+        })
+        .unwrap_or(1)
 }
 
 /// A *contiguous* page range, which is all poppler can express: `1-3`, `4`,
@@ -1361,10 +1608,27 @@ fn build_ghostscript(request: &JobRequest, scratch: &Path) -> Result<CommandSpec
                     push_flag(&mut args, "-dJPEGQ", &quality.clamp(1, 100).to_string());
                 }
             }
-            let page = opt_i64(options, "pdf_page").unwrap_or(1).max(1);
-            push_flag(&mut args, "-dFirstPage", &page.to_string());
-            push_flag(&mut args, "-dLastPage", &page.to_string());
-            args.push(output_flag(scratch));
+            let page = single_page(request);
+            if let Some((first, last)) = pdf_range(request)? {
+                push_flag(&mut args, "-dFirstPage", &first.to_string());
+                if let Some(last) = last {
+                    push_flag(&mut args, "-dLastPage", &last.to_string());
+                }
+                let ext = scratch
+                    .extension()
+                    .map_or_else(String::new, |ext| ext.to_string_lossy().into_owned());
+                args.push(
+                    format!(
+                        "-sOutputFile={}-%03d.{ext}",
+                        without_extension(scratch).display()
+                    )
+                    .into(),
+                );
+            } else {
+                push_flag(&mut args, "-dFirstPage", &page.to_string());
+                push_flag(&mut args, "-dLastPage", &page.to_string());
+                args.push(output_flag(scratch));
+            }
             args.push(request.sources[0].clone().into_os_string());
         }
         (action, _) => return Err(unsupported(action, "ghostscript", "M5")),
@@ -1735,6 +1999,7 @@ mod tests {
                 _ => Options::new(),
             },
             output_dir: None,
+            steps: Vec::new(),
         }
     }
 
@@ -1988,7 +2253,12 @@ mod tests {
         .unwrap();
         let args = args_of(&built);
         assert!(args.windows(2).any(|pair| pair == ["-ss", "3"]));
-        assert!(args.windows(2).any(|pair| pair == ["-frames:v", "1"]));
+        // A run, not one still: the fps filter thins the stream, the cap keeps
+        // a feature film from writing thousands of PNGs, and the output is a
+        // pattern the image2 muxer numbers.
+        assert!(args.iter().any(|arg| arg.starts_with("fps=")), "{args:?}");
+        assert!(args.windows(2).any(|pair| pair == ["-frames:v", "100"]));
+        assert_eq!(args.last().unwrap(), "/o-%04d.png");
     }
 
     #[test]

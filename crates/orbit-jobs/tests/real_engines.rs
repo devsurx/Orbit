@@ -165,6 +165,7 @@ fn image_request(source: &Path, target_ext: &str, opts: serde_json::Value) -> Jo
         sources: vec![source.to_path_buf()],
         options: options(opts),
         output_dir: None,
+        steps: Vec::new(),
     }
 }
 
@@ -303,6 +304,7 @@ fn ffmpeg_really_converts_a_wav_to_mp3_without_overwriting() {
         sources: vec![source.clone()],
         options: options(json!({ "audio_bitrate": "192000" })),
         output_dir: None,
+        steps: Vec::new(),
     };
 
     let first = done_path(&run(request.clone()));
@@ -343,6 +345,7 @@ fn conversion_progress_is_reported_as_percentages() {
         sources: vec![source.clone()],
         options: options(json!({})),
         output_dir: None,
+        steps: Vec::new(),
     };
 
     let events = run(request);
@@ -399,6 +402,7 @@ fn a_missing_engine_fails_with_a_readable_reason() {
         sources: vec![source],
         options: options(json!({})),
         output_dir: None,
+        steps: Vec::new(),
     });
 
     match &events.last().unwrap().state {
@@ -446,6 +450,7 @@ fn engine_request(
         sources,
         options: options(opts),
         output_dir: None,
+        steps: Vec::new(),
     }
 }
 

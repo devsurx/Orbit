@@ -7,6 +7,9 @@
 # instance by Orbit's single-instance support, which is what makes this safe to
 # call from a compositor keybinding.
 #
+# Headless work is delegated to `orbit-cli`: `orbit convert …`, `orbit preset …`,
+# `orbit list`, `orbit history`. The GUI has no terminal, but a CLI should.
+#
 # Job outcomes are appended to $XDG_STATE_HOME/orbit/jobs.log (usually
 # ~/.local/state/orbit/jobs.log), which is where to look when the ring has
 # already faded: every published file is logged by absolute path.
@@ -20,12 +23,18 @@ LOG="$STATE/orbit/jobs.log"
 usage() {
     cat <<EOF
 Usage: orbit [file …]
+       orbit convert --to FORMAT FILE … [options]
+       orbit action ACTION FILE … [options]
+       orbit preset PRESET FILE …
+       orbit list [formats|actions|presets|engines]
+       orbit history [--limit N]
 
   orbit              reopen the ring for the last selection
   orbit FILE …       open the ring for these files
 
 Results are written *beside each source* as "name (converted).ext", never
-overwriting anything. Each one is also logged to:
+overwriting anything, unless --out is given to a CLI command. Each one is also
+logged to:
   $LOG
 
 Orbit's global hotkey does not work on Wayland. Bind this command in your
@@ -40,6 +49,25 @@ case "${1:-}" in
     ;;
 --log)
     exec "${PAGER:-less}" "$LOG"
+    ;;
+convert | action | preset | list | history)
+    # A headless command, not a file to drop. clap-free flag parsing lives in
+    # the CLI; this script only has to find it.
+    CLI="${ORBIT_CLI_BIN:-}"
+    if [ -z "$CLI" ]; then
+        for candidate in "$ROOT/target/release/orbit-cli" "$ROOT/target/debug/orbit-cli"; do
+            if [ -x "$candidate" ]; then
+                CLI="$candidate"
+                break
+            fi
+        done
+    fi
+    if [ -z "$CLI" ] || [ ! -x "$CLI" ]; then
+        echo "orbit: no orbit-cli build found under $ROOT/target" >&2
+        echo "       build one with: cargo build -p orbit-cli" >&2
+        exit 1
+    fi
+    exec "$CLI" "$@"
     ;;
 esac
 

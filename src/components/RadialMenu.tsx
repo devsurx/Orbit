@@ -89,7 +89,12 @@ export default function RadialMenu({
   const activeIndex = active ? categories.findIndex((category) => category.id === active.id) : -1;
 
   return (
-    <div className="relative animate-bloom" style={{ width: RING_SIZE, height: RING_SIZE }}>
+    <div
+      className="relative animate-bloom"
+      style={{ width: RING_SIZE, height: RING_SIZE }}
+      onClick={(event) => event.stopPropagation()}
+      role="presentation"
+    >
       <div
         className="pointer-events-none absolute rounded-full border border-white/[0.07]"
         style={guideRing(R_CATEGORY)}

@@ -414,18 +414,21 @@ fn a_ring_control_is_not_a_job() {
 }
 
 #[test]
-fn a_preset_says_it_needs_a_later_milestone() {
+fn a_preset_is_a_chain_of_resolved_steps() {
     let pick = Pick {
         kind: PickKind::Preset,
-        reference: "podcast-clip".to_owned(),
+        reference: "web-ready".to_owned(),
         defaults: Options::default(),
     };
-    let error = resolve_pick(&registry(), &installed(), &pick, &[]).unwrap_err();
-    assert!(
-        matches!(error, ResolveError::NotYetSupported(_)),
-        "{error:?}"
-    );
-    assert!(error.to_string().contains("milestone"), "{error}");
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &pick,
+        &[PathBuf::from("/tmp/orbit/holiday.png")],
+    )
+    .expect("resolves");
+    assert_eq!(resolution.requests.len(), 1);
+    assert_eq!(resolution.requests[0].steps.len(), 3);
 }
 
 #[test]
@@ -458,4 +461,64 @@ fn the_options_the_ring_resolved_travel_with_the_job() {
 
     let quality = resolution.requests[0].options.get("quality");
     assert_eq!(quality, Some(&serde_json::json!(55)));
+}
+
+#[test]
+fn a_preset_becomes_one_job_with_every_step_resolved() {
+    let pick = Pick {
+        kind: PickKind::Preset,
+        reference: "web-ready".to_owned(),
+        defaults: Options::default(),
+    };
+    let resolution = resolve_pick(
+        &registry(),
+        &installed(),
+        &pick,
+        &[PathBuf::from("/tmp/orbit/holiday.png")],
+    )
+    .expect("resolves");
+
+    assert_eq!(resolution.requests.len(), 1, "one request per dragged file");
+    let request = &resolution.requests[0];
+    assert_eq!(request.action, "chain");
+    assert_eq!(
+        request.target_ext, "webp",
+        "the last step decides the result"
+    );
+    assert_eq!(request.tag, "web-ready", "the preset names the output");
+    assert_eq!(request.steps.len(), 3);
+    assert_eq!(request.steps[0].action, "resize");
+    assert_eq!(request.steps[1].action, "convert");
+    assert_eq!(request.steps[1].target_ext, "webp");
+    assert_eq!(request.steps[2].action, "strip_metadata");
+    assert!(
+        request.steps.iter().all(|step| step.engine == "magick"),
+        "the one installed engine carries every step"
+    );
+    // The intermediate steps keep the format, so the last one is the only
+    // place the extension changes.
+    assert_eq!(request.steps[0].target_ext, "png");
+}
+
+#[test]
+fn a_preset_that_needs_a_missing_engine_is_refused_with_a_reason() {
+    let pick = Pick {
+        kind: PickKind::Preset,
+        reference: "web-ready".to_owned(),
+        defaults: Options::default(),
+    };
+    let resolution = resolve_pick(
+        &registry(),
+        &engines(&[("ffmpeg", "/usr/bin/ffmpeg")]),
+        &pick,
+        &[PathBuf::from("/tmp/orbit/holiday.png")],
+    )
+    .expect("the pick itself is valid");
+
+    assert!(resolution.is_empty());
+    let reason = resolution.first_reason().unwrap_or_default();
+    assert!(
+        reason.contains("Web ready"),
+        "the reason names the preset: {reason}"
+    );
 }
