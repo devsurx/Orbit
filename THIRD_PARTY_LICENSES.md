@@ -36,6 +36,7 @@ Direct dependencies only; the full transitive set is pinned in
 | [`tauri-plugin-single-instance`](https://crates.io/crates/tauri-plugin-single-instance) | MIT OR Apache-2.0 | Handing a second launch to the running instance |
 | [`tauri-plugin-dialog`](https://crates.io/crates/tauri-plugin-dialog) | MIT OR Apache-2.0 | The native folder picker in settings |
 | [`rdev`](https://crates.io/crates/rdev) | MIT | The global Shift-drag input listener (X11, Windows, macOS) |
+| [`nix`](https://crates.io/crates/nix) | MIT | Signalling an engine's whole process group when a job is cancelled (Unix) |
 
 `image` is configured without its default features, so the decoder and encoder
 set is exactly PNG, JPEG, BMP and TIFF — the formats the built-in engine
