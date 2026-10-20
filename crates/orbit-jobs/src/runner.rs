@@ -446,11 +446,22 @@ fn run_process(
         );
     }
 
-    let mut child = Command::new(&spec.program)
+    let mut command = Command::new(&spec.program);
+    command
         .args(&spec.args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // A process group of its own lets a cancel take the engine's children
+        // too. Otherwise `child.kill()` stops only the shell or launcher, and a
+        // surviving grandchild keeps the stdout pipe open, so the wait blocks
+        // for as long as the engine would have run.
+        command.process_group(0);
+    }
+    let mut child = command
         .spawn()
         .map_err(|error| Failure::Io(error.to_string()))?;
 
@@ -464,7 +475,7 @@ fn run_process(
     // Poll rather than block, so cancellation always lands promptly.
     let status = loop {
         if cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
+            terminate(&mut child);
             let _ = child.wait();
             if let Some(progress) = progress {
                 let _ = progress.join();
@@ -494,6 +505,33 @@ fn run_process(
         ));
     }
     Ok(())
+}
+
+/// Stop an engine and everything it started.
+///
+/// `Child::kill` only signals the process itself. Engines such as `LibreOffice`
+/// and `Ghostscript` start helpers of their own, so the whole process group is
+/// signalled on Unix; Windows gets the equivalent through `taskkill /T`.
+fn terminate(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        if let Ok(pid) = i32::try_from(child.id()) {
+            // A negative pid addresses the process group created at spawn.
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(-pid),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
 }
 
 /// Move an engine-named result onto the scratch path.
