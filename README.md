@@ -585,9 +585,15 @@ Orbit/
 │   └── orbit-cli/            # ⌨️  headless `orbit convert …`
 ├── scripts/orbit             # ⌨️  `orbit [file …]` launcher + job log
 ├── scripts/windows/          # 🪟  "Send to → Orbit" installer
-├── .github/workflows/        # 📦  CI on every push, installers on every tag
+├── site/                     # 🌐  landing + download page (GitHub Pages)
+├── .github/workflows/        # 📦  CI, installers on tags, Pages for site/
 └── src/                      # ⚛️  React + Vite + Tailwind radial UI
 ```
+
+The landing page in [`site/`](site/) is plain HTML, CSS and JavaScript. Edit it
+and push; [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes
+the folder to <https://devsurx.github.io/Orbit/>. No build step or external
+fonts/scripts are involved.
 
 ## 📦 Building installers
 
