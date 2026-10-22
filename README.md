@@ -12,6 +12,7 @@ engines, no uploads, no account.</sub>
 
 <br />
 
+[![Website](https://img.shields.io/badge/website-downloads-6e4aff.svg)](https://devsurx.github.io/Orbit/)
 [![License: MPL 2.0](https://img.shields.io/badge/license-MPL%202.0-6e4aff.svg)](https://www.mozilla.org/en-US/MPL/2.0/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2ea043.svg)](#-platform-support)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-dea584.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
